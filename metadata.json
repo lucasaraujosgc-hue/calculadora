@@ -1,0 +1,8 @@
+{
+  "name": "Calculadora",
+  "description": "Calculadoras de precificação e simulação financeira para clientes Vírgula Contábil.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

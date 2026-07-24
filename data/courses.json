@@ -1,0 +1,116 @@
+[
+  {
+    "slug": "conformidade",
+    "courseName": "Guia de Conformidade Financeira",
+    "description": "Orientações essenciais e práticas para garantir a saúde contábil e a segurança jurídica da sua empresa, evitando passivos trabalhistas e fiscais.",
+    "modules": [
+      {
+        "id": "entidade",
+        "shortTitle": "Princípio da Entidade",
+        "kicker": "MÓDULO 01 · FUNDAMENTOS",
+        "title": "Separação de Contas",
+        "summary": "O patrimônio da empresa (Pessoa Jurídica) é independente do patrimônio dos sócios (Pessoa Física).",
+        "content": [
+          { "type": "paragraph", "text": "A mistura de contas é o erro mais comum e perigoso na gestão de pequenos negócios, podendo levar à desconsideração da personalidade jurídica da sua empresa." },
+          { "type": "highlight", "text": "O dinheiro da empresa não é o seu dinheiro. O seu dinheiro não é o dinheiro da empresa." },
+          { "type": "callout", "title": "Regra Prática", "items": [
+            "Nunca pague despesas pessoais (fatura de cartão de crédito, boletos, contas de casa) com a conta da empresa.",
+            "Nunca pague despesas da empresa com sua conta pessoal."
+          ]}
+        ]
+      },
+      {
+        "id": "pf",
+        "shortTitle": "Pagamentos a PF",
+        "kicker": "MÓDULO 02 · RETENÇÕES",
+        "title": "Pagamentos a Pessoa Física",
+        "summary": "Ao contratar serviços de autônomos (Pessoa Física - RPA), existem incidências tributárias obrigatórias que a sua empresa deve recolher.",
+        "content": [
+          { "type": "paragraph", "text": "O pagamento direto a autônomos sem a devida retenção configura sonegação e expõe a empresa a multas e passivos trabalhistas." },
+          { "type": "list", "items": [
+            "Há retenção de 11% de INSS do prestador.",
+            "Para empresas fora do Simples Nacional, soma-se o encargo patronal (geralmente 20%)."
+          ]},
+          { "type": "callout", "title": "Ação Exigida", "items": [
+            "Sempre consulte a contabilidade ANTES de fechar o serviço com pessoa física para calcular o custo real."
+          ]}
+        ]
+      },
+      {
+        "id": "nf",
+        "shortTitle": "Documentação",
+        "kicker": "MÓDULO 03 · COMPROVAÇÃO",
+        "title": "Exigência de Nota Fiscal",
+        "summary": "A Nota Fiscal é o único documento oficial que comprova a legalidade de uma despesa perante a Receita Federal.",
+        "content": [
+          { "type": "paragraph", "text": "Sem nota fiscal válida, a saída de caixa pode ser interpretada como distribuição de lucro disfarçada pelo Fisco, gerando tributação e multas pesadas." },
+          { "type": "highlight", "text": "Recibos simples, na grande maioria das vezes, não têm validade fiscal para dedução de despesas da sua empresa." },
+          { "type": "list", "items": [
+            "Solicite Nota Fiscal para TODA e qualquer despesa da empresa.",
+            "Guarde os comprovantes de pagamento atrelados às respectivas notas."
+          ]}
+        ]
+      },
+      {
+        "id": "conta",
+        "shortTitle": "Conta Exclusiva PJ",
+        "kicker": "MÓDULO 04 · FLUXO",
+        "title": "Conta Bancária Exclusiva",
+        "summary": "Toda a movimentação financeira da empresa deve ser transparente, rastreável e estar estritamente vinculada ao seu CNPJ.",
+        "content": [
+          { "type": "paragraph", "text": "A conta PJ é o reflexo exato da contabilidade. Tudo que acontece na empresa deve obrigatoriamente passar por ela." },
+          { "type": "callout", "title": "Fluxo de Caixa", "items": [
+            "Todas as despesas devem ser pagas através da conta bancária PJ.",
+            "Recebimentos de clientes devem entrar exclusivamente nesta conta, sem atalhos ou desvios para contas pessoais."
+          ]}
+        ]
+      },
+      {
+        "id": "recursos",
+        "shortTitle": "Retirar Recursos",
+        "kicker": "MÓDULO 05 · REMUNERAÇÃO",
+        "title": "Como retirar recursos corretamente",
+        "summary": "Existem apenas duas vias formais e legais para o sócio retirar dinheiro da empresa.",
+        "content": [
+          { "type": "heading", "text": "As Duas Vias Oficiais" },
+          { "type": "list", "items": [
+            "Pró-labore: remuneração mensal fixa do sócio pela atuação na empresa, com retenção de INSS e IRRF.",
+            "Distribuição de lucros: retirada do lucro apurado, isenta de IR quando dentro das regras vigentes e respaldada por apuração contábil."
+          ]},
+          { "type": "highlight", "text": "Qualquer valor que o sócio precise usar para fins pessoais deve primeiro sair da empresa por uma dessas duas vias — e só depois ser gasto." }
+        ]
+      },
+      {
+        "id": "reforma",
+        "shortTitle": "Reforma Tributária",
+        "kicker": "MÓDULO 06 · FUTURO",
+        "title": "Impactos da Reforma Tributária",
+        "summary": "Cronograma de transição para os novos impostos IBS e CBS que substituirão ICMS, ISS, PIS, COFINS e IPI.",
+        "content": [
+          { "type": "timeline", "items": [
+            { "year": "2026", "text": "Início da transição com alíquota teste de 0,9% para a CBS e 0,1% para o IBS. Compensação com PIS/COFINS." },
+            { "year": "2027", "text": "Extinção completa do PIS e da COFINS. Redução a zero da alíquota do IPI (exceto itens da Zona Franca de Manaus)." },
+            { "year": "2029", "text": "Início da redução gradual das alíquotas do ICMS e do ISS (1/10 ao ano)." },
+            { "year": "2033", "text": "Vigência integral do novo sistema. ICMS e ISS são completamente extintos." }
+          ]}
+        ]
+      },
+      {
+        "id": "checklist",
+        "shortTitle": "Rotina Mensal",
+        "kicker": "MÓDULO 07 · PRÁTICA",
+        "title": "Checklist de Fechamento",
+        "summary": "Garanta que sua empresa envie todas as informações necessárias para a contabilidade no prazo correto.",
+        "content": [
+          { "type": "checklist", "items": [
+            "Extrato bancário da conta PJ exportado em formato OFX.",
+            "Comprovantes de pagamento anexados e identificados.",
+            "Notas fiscais de serviços tomados (fornecedores) enviadas.",
+            "Notas fiscais de serviços prestados (clientes) emitidas e conferidas.",
+            "Informações sobre faltas, atestados e férias de funcionários enviadas ao DP."
+          ]}
+        ]
+      }
+    ]
+  }
+]

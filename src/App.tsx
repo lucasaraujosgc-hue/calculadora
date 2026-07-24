@@ -1,0 +1,41 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import AuthScreen from './pages/AuthScreen';
+import Layout from './components/Layout';
+import Dashboard from './pages/Dashboard';
+import Relatorios from './pages/Relatorios';
+import FormacaoPreco from './pages/FormacaoPreco';
+import MixPreco from './pages/MixPreco';
+import CustoFixo from './pages/CustoFixo';
+import CustosVariaveis from './pages/CustosVariaveis';
+import SimuladorImpostos from './pages/SimuladorImpostos';
+import { useAppContext } from './context/AppContext';
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, isGuest } = useAppContext();
+  
+  if (!user && !isGuest) {
+    return <Navigate to="/auth" />;
+  }
+  
+  return <Layout>{children}</Layout>;
+}
+
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/auth" element={<AuthScreen />} />
+        <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/relatorios" element={<ProtectedRoute><Relatorios /></ProtectedRoute>} />
+        <Route path="/formacao-preco" element={<ProtectedRoute><FormacaoPreco /></ProtectedRoute>} />
+        <Route path="/mix-preco" element={<ProtectedRoute><MixPreco /></ProtectedRoute>} />
+        <Route path="/custos-fixos" element={<ProtectedRoute><CustoFixo /></ProtectedRoute>} />
+        <Route path="/custos-variaveis" element={<ProtectedRoute><CustosVariaveis /></ProtectedRoute>} />
+        <Route path="/impostos" element={<ProtectedRoute><SimuladorImpostos /></ProtectedRoute>} />
+        {/* Catch-all */}
+        <Route path="*" element={<ProtectedRoute><div>Em desenvolvimento...</div></ProtectedRoute>} />
+      </Routes>
+    </Router>
+  );
+}
