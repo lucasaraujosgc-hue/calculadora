@@ -15,17 +15,38 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
 
-  const handleAuth = (e: React.FormEvent) => {
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isRegistering) {
        if (!name || !email || !phone || !password) return alert('Preencha todos os campos');
-       login({ name, email, phone }, rememberMe);
+       
+       setIsLoading(true);
+       try {
+         const res = await fetch('/api/register', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ name, email, phone, password }),
+         });
+         
+         if (!res.ok) throw new Error('Erro ao registrar');
+         
+         login({ name, email, phone }, rememberMe);
+         const origin = (location.state as any)?.from?.pathname || '/';
+         navigate(origin);
+       } catch (err) {
+         alert('Houve um erro ao realizar o cadastro.');
+         console.error(err);
+       } finally {
+         setIsLoading(false);
+       }
     } else {
        if (!email || !password) return alert('Preencha e-mail e senha');
        login({ name: 'Usuário Padrão', email, phone: '000000000' }, rememberMe);
+       const origin = (location.state as any)?.from?.pathname || '/';
+       navigate(origin);
     }
-    const origin = (location.state as any)?.from?.pathname || '/';
-    navigate(origin);
   };
 
   const handleGuest = () => {
@@ -105,8 +126,8 @@ export default function AuthScreen() {
             </label>
           </div>
           
-          <button type="submit" className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 transition-colors">
-            {isRegistering ? 'Cadastrar' : 'Entrar'}
+          <button type="submit" disabled={isLoading} className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 transition-colors disabled:opacity-50">
+            {isLoading ? 'Aguarde...' : (isRegistering ? 'Cadastrar' : 'Entrar')}
           </button>
         </form>
         

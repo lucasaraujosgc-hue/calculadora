@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
 import * as dotenv from "dotenv";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -16,6 +17,35 @@ app.use(cookieParser());
 
 const DATA_FILE = path.join(process.cwd(), "data", "courses.json");
 const LEADS_FILE = path.join(process.cwd(), "data", "leads.json");
+const USERS_FILE = path.join(process.cwd(), "data", "users.json");
+
+function getUsers() {
+  if (!fs.existsSync(USERS_FILE)) {
+    return [];
+  }
+  const data = fs.readFileSync(USERS_FILE, "utf-8");
+  return JSON.parse(data);
+}
+
+function saveUsers(users: any) {
+  const dir = path.dirname(USERS_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf-8");
+}
+
+// Nodemailer transport setup
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT) || 587,
+  secure: Number(process.env.SMTP_PORT) === 465,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
 
 // Simple helper to read/write JSON
 function getCourses() {
@@ -169,6 +199,52 @@ app.post("/api/leads", (req, res) => {
   leads.push(newLead);
   saveLeads(leads);
   res.json(newLead);
+});
+
+// Registration route
+app.post("/api/register", async (req, res) => {
+  try {
+    const { name, email, phone, password } = req.body;
+    
+    // Save user locally
+    const users = getUsers();
+    const newUser = { name, email, phone, timestamp: new Date().toISOString() };
+    users.push(newUser);
+    saveUsers(users);
+
+    // Prepare email
+    if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+      const fromName = process.env.SMTP_FROM_NAME || "Cadastro - Vírgula Contábil";
+      const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+      
+      await transporter.sendMail({
+        from: `"${fromName}" <${fromEmail}>`,
+        to: email,
+        subject: "Bem-vindo à Calculadora - Vírgula Contábil",
+        text: `Olá ${name},\n\nObrigado por se cadastrar na plataforma Vírgula Contábil!\n\nSeu acesso foi criado com sucesso.\n\nAtenciosamente,\nEquipe Vírgula Contábil`,
+        html: `
+          <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden;">
+            <div style="background-color: #10b981; padding: 20px; text-align: center;">
+              <h2 style="color: #fff; margin: 0;">Bem-vindo à Vírgula Contábil</h2>
+            </div>
+            <div style="padding: 30px;">
+              <p>Olá <strong>${name}</strong>,</p>
+              <p>Obrigado por se cadastrar na nossa plataforma de calculadoras e relatórios.</p>
+              <p>Seu acesso foi criado com sucesso e você já pode começar a utilizar todas as ferramentas para otimizar os resultados da sua empresa.</p>
+              <br/>
+              <p>Atenciosamente,</p>
+              <p><strong>Equipe Vírgula Contábil</strong></p>
+            </div>
+          </div>
+        `
+      });
+    }
+
+    res.json({ success: true, user: newUser });
+  } catch (error) {
+    console.error("Error registering user:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Vite middleware for development
