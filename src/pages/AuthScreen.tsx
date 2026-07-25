@@ -30,22 +30,40 @@ export default function AuthScreen() {
            body: JSON.stringify({ name, email, phone, password }),
          });
          
-         if (!res.ok) throw new Error('Erro ao registrar');
+         const data = await res.json();
+         if (!res.ok) throw new Error(data.error || 'Erro ao registrar');
          
-         login({ name, email, phone }, rememberMe);
-         const origin = (location.state as any)?.from?.pathname || '/';
-         navigate(origin);
-       } catch (err) {
-         alert('Houve um erro ao realizar o cadastro.');
+         alert(data.message || 'Verifique seu e-mail para ativar a conta.');
+         setIsRegistering(false); // go back to login view
+       } catch (err: any) {
+         alert(err.message || 'Houve um erro ao realizar o cadastro.');
          console.error(err);
        } finally {
          setIsLoading(false);
        }
     } else {
        if (!email || !password) return alert('Preencha e-mail e senha');
-       login({ name: 'Usuário Padrão', email, phone: '000000000' }, rememberMe);
-       const origin = (location.state as any)?.from?.pathname || '/';
-       navigate(origin);
+       
+       setIsLoading(true);
+       try {
+         const res = await fetch('/api/login', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ email, password }),
+         });
+         
+         const data = await res.json();
+         if (!res.ok) throw new Error(data.error || 'Erro ao fazer login');
+         
+         login(data.user, rememberMe);
+         const origin = (location.state as any)?.from?.pathname || '/';
+         navigate(origin);
+       } catch (err: any) {
+         alert(err.message || 'Erro ao fazer login.');
+         console.error(err);
+       } finally {
+         setIsLoading(false);
+       }
     }
   };
 

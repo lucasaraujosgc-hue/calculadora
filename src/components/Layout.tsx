@@ -22,6 +22,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { name: 'Configurações', path: '/configuracoes', icon: Settings },
   ];
 
+  if (user?.role === 'admin') {
+    menuItems.push({ name: 'Administração', path: '/admin', icon: Users, highlight: 'bg-blue-500/10 text-blue-600 border-blue-500/20' });
+  }
+
   const SidebarContent = ({ isMobile = false }: { isMobile?: boolean }) => (
     <>
       <div className="h-16 flex items-center justify-between px-6 border-b border-border shrink-0">

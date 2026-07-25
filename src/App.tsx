@@ -10,6 +10,8 @@ import MixPrecoLote from './pages/MixPrecoLote';
 import CustoFixo from './pages/CustoFixo';
 import CustosVariaveis from './pages/CustosVariaveis';
 import SimuladorImpostos from './pages/SimuladorImpostos';
+import VerifyEmail from './pages/VerifyEmail';
+import AdminPanel from './pages/AdminPanel';
 import { useAppContext } from './context/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -27,6 +29,7 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/auth" element={<AuthScreen />} />
+        <Route path="/verify" element={<VerifyEmail />} />
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/relatorios" element={<ProtectedRoute><Relatorios /></ProtectedRoute>} />
         <Route path="/formacao-preco" element={<ProtectedRoute><FormacaoPreco /></ProtectedRoute>} />
@@ -35,6 +38,7 @@ export default function App() {
         <Route path="/custos-fixos" element={<ProtectedRoute><CustoFixo /></ProtectedRoute>} />
         <Route path="/custos-variaveis" element={<ProtectedRoute><CustosVariaveis /></ProtectedRoute>} />
         <Route path="/impostos" element={<ProtectedRoute><SimuladorImpostos /></ProtectedRoute>} />
+        <Route path="/admin" element={<ProtectedRoute><AdminPanel /></ProtectedRoute>} />
         {/* Catch-all */}
         <Route path="*" element={<ProtectedRoute><div>Em desenvolvimento...</div></ProtectedRoute>} />
       </Routes>

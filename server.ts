@@ -6,6 +6,8 @@ import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
 import * as dotenv from "dotenv";
 import nodemailer from "nodemailer";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -95,27 +97,6 @@ function requireAuth(req: any, res: any, next: any) {
 }
 
 // API Routes
-app.post("/api/login", (req, res) => {
-  const { username, password } = req.body;
-  
-  if (
-    username === process.env.ADMIN_USERNAME &&
-    password === process.env.ADMIN_PASSWORD
-  ) {
-    const token = jwt.sign({ role: "admin" }, process.env.JWT_SECRET || "default-secret", {
-      expiresIn: "1d",
-    });
-    res.cookie("admin_token", token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
-    return res.json({ success: true });
-  }
-  
-  return res.status(401).json({ error: "Invalid credentials" });
-});
-
-app.post("/api/logout", (req, res) => {
-  res.clearCookie("admin_token");
-  res.json({ success: true });
-});
 
 // Admin routes (protected)
 app.get("/api/admin/courses", requireAuth, (req, res) => {
@@ -206,45 +187,149 @@ app.post("/api/register", async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
     
-    // Save user locally
     const users = getUsers();
-    const newUser = { name, email, phone, timestamp: new Date().toISOString() };
+    
+    // Verify if user already exists
+    if (users.find((u: any) => u.email === email)) {
+      return res.status(400).json({ error: "E-mail já cadastrado" });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+    const activationToken = crypto.randomBytes(20).toString('hex');
+    
+    const newUser = { 
+      name, 
+      email, 
+      phone, 
+      passwordHash,
+      role: 'user',
+      isActivated: false,
+      activationToken,
+      timestamp: new Date().toISOString() 
+    };
+    
     users.push(newUser);
     saveUsers(users);
 
     // Prepare email
-    if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
       const fromName = process.env.SMTP_FROM_NAME || "Cadastro - Vírgula Contábil";
       const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
       
-      await transporter.sendMail({
-        from: `"${fromName}" <${fromEmail}>`,
-        to: email,
-        subject: "Bem-vindo à Calculadora - Vírgula Contábil",
-        text: `Olá ${name},\n\nObrigado por se cadastrar na plataforma Vírgula Contábil!\n\nSeu acesso foi criado com sucesso.\n\nAtenciosamente,\nEquipe Vírgula Contábil`,
-        html: `
-          <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden;">
-            <div style="background-color: #10b981; padding: 20px; text-align: center;">
-              <h2 style="color: #fff; margin: 0;">Bem-vindo à Vírgula Contábil</h2>
+      const appHost = req.get('host') || 'localhost:3000';
+      const protocol = req.protocol || 'http';
+      const verificationLink = `${protocol}://${appHost}/verify?token=${activationToken}`;
+      
+      try {
+        await transporter.sendMail({
+          from: `"${fromName}" <${fromEmail}>`,
+          to: email,
+          subject: "Ative sua conta - Vírgula Contábil",
+          text: `Olá ${name},\n\nObrigado por se cadastrar!\n\nPor favor, ative sua conta clicando no link: ${verificationLink}\n\nAtenciosamente,\nEquipe Vírgula Contábil`,
+          html: `
+            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden;">
+              <div style="background-color: #10b981; padding: 20px; text-align: center;">
+                <h2 style="color: #fff; margin: 0;">Bem-vindo à Vírgula Contábil</h2>
+              </div>
+              <div style="padding: 30px;">
+                <p>Olá <strong>${name}</strong>,</p>
+                <p>Obrigado por se cadastrar na nossa plataforma.</p>
+                <p>Para começar a utilizar todas as ferramentas, por favor ative sua conta clicando no botão abaixo:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${verificationLink}" style="background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">Ativar Minha Conta</a>
+                </div>
+                <p>Ou acesse pelo link: <a href="${verificationLink}">${verificationLink}</a></p>
+                <br/>
+                <p>Atenciosamente,</p>
+                <p><strong>Equipe Vírgula Contábil</strong></p>
+              </div>
             </div>
-            <div style="padding: 30px;">
-              <p>Olá <strong>${name}</strong>,</p>
-              <p>Obrigado por se cadastrar na nossa plataforma de calculadoras e relatórios.</p>
-              <p>Seu acesso foi criado com sucesso e você já pode começar a utilizar todas as ferramentas para otimizar os resultados da sua empresa.</p>
-              <br/>
-              <p>Atenciosamente,</p>
-              <p><strong>Equipe Vírgula Contábil</strong></p>
-            </div>
-          </div>
-        `
-      });
+          `
+        });
+        console.log("Activation email sent to", email);
+      } catch (emailError) {
+        console.error("Failed to send activation email:", emailError);
+      }
     }
 
-    res.json({ success: true, user: newUser });
+    res.json({ success: true, message: 'Usuário cadastrado com sucesso. Verifique seu e-mail para ativar a conta.' });
   } catch (error) {
     console.error("Error registering user:", error);
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+app.post("/api/verify", (req, res) => {
+  const { token } = req.body;
+  const users = getUsers();
+  
+  const userIndex = users.findIndex((u: any) => u.activationToken === token);
+  
+  if (userIndex !== -1) {
+    users[userIndex].isActivated = true;
+    users[userIndex].activationToken = null;
+    saveUsers(users);
+    res.json({ success: true, message: 'Conta ativada com sucesso!' });
+  } else {
+    res.status(400).json({ error: "Token inválido ou expirado" });
+  }
+});
+
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    // Check if it's admin
+    if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
+      return res.json({ 
+        success: true, 
+        user: { name: 'Admin', email: process.env.ADMIN_EMAIL, role: 'admin', isActivated: true }
+      });
+    }
+
+    const users = getUsers();
+    const user = users.find((u: any) => u.email === email);
+    
+    if (!user) {
+      return res.status(401).json({ error: "Credenciais inválidas" });
+    }
+    
+    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+    
+    if (!isValidPassword) {
+      return res.status(401).json({ error: "Credenciais inválidas" });
+    }
+    
+    if (!user.isActivated) {
+      return res.status(403).json({ error: "Sua conta ainda não foi ativada. Verifique seu e-mail." });
+    }
+    
+    // Exclude passwordHash before sending
+    const { passwordHash, activationToken, ...userWithoutSensitiveData } = user;
+    
+    res.json({ success: true, user: userWithoutSensitiveData });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Admin Routes for Users
+app.get("/api/admin/users", (req, res) => {
+  const users = getUsers().map((u: any) => {
+    const { passwordHash, activationToken, ...user } = u;
+    return user;
+  });
+  res.json(users);
+});
+
+app.delete("/api/admin/users/:email", (req, res) => {
+  let users = getUsers();
+  const emailToDelete = req.params.email;
+  users = users.filter((u: any) => u.email !== emailToDelete);
+  saveUsers(users);
+  res.json({ success: true });
 });
 
 // Vite middleware for development
