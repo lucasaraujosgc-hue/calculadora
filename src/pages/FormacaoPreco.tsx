@@ -49,11 +49,13 @@ export default function FormacaoPreco() {
   };
 
   // --- Calculations ---
+  const custoFixoUnitario = vendasProjetadas > 0 ? (custoFixoTotal / vendasProjetadas) : 0;
+
   const despesasVariaveisPerc = imposto + taxaCartao + comissao;
   const totalPerc = despesasVariaveisPerc + margem;
   const divisor = (100 - totalPerc) / 100;
   
-  const preco = divisor > 0 ? (custo / divisor) : 0;
+  const preco = divisor > 0 ? ((custo + custoFixoUnitario) / divisor) : 0;
   
   const valorImposto = preco * (imposto / 100);
   const valorTaxa = preco * (taxaCartao / 100);
@@ -83,12 +85,13 @@ export default function FormacaoPreco() {
 
   const data = [
     { name: 'Custo Variável (CMV)', value: custo },
+    { name: 'Custo Fixo Unitário', value: custoFixoUnitario },
     { name: 'Impostos', value: valorImposto },
     { name: 'Taxas & Comissões', value: valorTaxa + valorComissao },
-    { name: 'Lucro (Margem Contribuição)', value: margemContribuicao },
+    { name: 'Lucro Líquido', value: valorMargem },
   ].map(item => ({ ...item, value: Number(item.value.toFixed(2)) }));
 
-  const COLORS = ['#94a3b8', '#ef4444', '#f59e0b', '#10b981'];
+  const COLORS = ['#94a3b8', '#8b5cf6', '#ef4444', '#f59e0b', '#10b981'];
 
   const chartData = [0, 0.5, 1, 1.5, 2].map(mult => {
     const qty = Math.round(peUnidades * mult);
@@ -152,7 +155,7 @@ export default function FormacaoPreco() {
                 <input type="number" value={taxaCartao} onChange={e => setTaxaCartao(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Comissão (%)</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Outros (Comissão e afins) %</label>
                 <input type="number" value={comissao} onChange={e => setComissao(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
               </div>
               <div>
@@ -179,6 +182,12 @@ export default function FormacaoPreco() {
                 <p className="text-sm font-medium text-muted-foreground mb-1">Margem de Contribuição</p>
                 <h3 className="text-3xl font-semibold text-emerald-600">R$ {margemContribuicao.toFixed(2)}</h3>
                 <p className="text-xs text-muted-foreground mt-1">Valor que sobra para pagar Custos Fixos e gerar Lucro.</p>
+             </div>
+
+             <div className="bg-card border border-border p-5 rounded-xl shadow-sm md:col-span-2">
+                <p className="text-sm font-medium text-muted-foreground mb-1">Lucro Líquido (por unidade)</p>
+                <h3 className="text-3xl font-semibold text-primary">R$ {valorMargem.toFixed(2)}</h3>
+                <p className="text-xs text-muted-foreground mt-1">O lucro real após descontar sua cota de custo fixo (estimativa).</p>
              </div>
           </div>
 

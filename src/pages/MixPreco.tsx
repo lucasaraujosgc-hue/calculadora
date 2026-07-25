@@ -34,11 +34,15 @@ export default function MixPreco() {
     const margem = p.margem || 0;
     const vendas = p.vendasProjetadas || 0;
 
+    const rateio = p.percentualRateio || 0;
+    const valorRateadoCF = (rateio / 100) * custoFixoTotal;
+    const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
+
     const despesasVariaveisPerc = imposto + taxaCartao + comissao;
     const totalPerc = despesasVariaveisPerc + margem;
     const divisor = (100 - totalPerc) / 100;
     
-    const preco = divisor > 0 ? (p.cmv / divisor) : 0;
+    const preco = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
     
     const valorImposto = preco * (imposto / 100);
     const valorTaxa = preco * (taxaCartao / 100);
@@ -52,7 +56,7 @@ export default function MixPreco() {
 
   const lucroMix = margemTotal - custoFixoTotal;
 
-  const COLORS = ['#94a3b8', '#ef4444', '#f59e0b', '#10b981'];
+  const COLORS = ['#94a3b8', '#8b5cf6', '#ef4444', '#f59e0b', '#10b981'];
 
   return (
     <div className="space-y-6 pb-12">
@@ -153,27 +157,31 @@ export default function MixPreco() {
           const rateio = p.percentualRateio || 0;
           const vendasProjetadas = p.vendasProjetadas || 0;
 
+          const valorRateadoCF = (rateio / 100) * custoFixoTotal;
+          const custoFixoUnitario = vendasProjetadas > 0 ? (valorRateadoCF / vendasProjetadas) : 0;
+
           const despesasVariaveisPerc = imposto + taxaCartao + comissao;
           const totalPerc = despesasVariaveisPerc + margem;
           const divisor = (100 - totalPerc) / 100;
           
-          const preco = divisor > 0 ? (p.cmv / divisor) : 0;
+          const preco = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
           
           const valorImposto = preco * (imposto / 100);
           const valorTaxa = preco * (taxaCartao / 100);
           const valorComissao = preco * (comissao / 100);
+          const valorMargem = preco * (margem / 100);
           const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao;
           
-          const valorRateadoCF = (rateio / 100) * custoFixoTotal;
           // Ponto de equilíbrio específico para este produto com base no SEU rateio
           const isValidMargem = margemContribuicao > 0;
           const peUnidades = isValidMargem ? (valorRateadoCF / margemContribuicao) : Infinity;
 
           const data = [
             { name: 'Custo Variável (CMV)', value: p.cmv },
+            { name: 'Custo Fixo Unitário', value: custoFixoUnitario },
             { name: 'Impostos', value: valorImposto },
             { name: 'Taxas & Comissões', value: valorTaxa + valorComissao },
-            { name: 'Lucro (Margem)', value: margemContribuicao },
+            { name: 'Lucro Líquido', value: valorMargem },
           ].map(item => ({ ...item, value: Number(item.value.toFixed(2)) }));
 
           return (
@@ -229,7 +237,7 @@ export default function MixPreco() {
                       <input type="number" value={taxaCartao} onChange={(e) => handleUpdateProduto(p.id, 'taxaCartao', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">Comissão (%)</label>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Outros (Comissão e afins) %</label>
                       <input type="number" value={comissao} onChange={(e) => handleUpdateProduto(p.id, 'comissao', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                     </div>
                     <div>
@@ -249,6 +257,11 @@ export default function MixPreco() {
                   <div className="bg-background border border-border p-5 rounded-xl shadow-sm flex flex-col justify-center">
                     <p className="text-sm font-medium text-muted-foreground mb-1">Margem de Contribuição</p>
                     <h3 className="text-3xl font-semibold text-emerald-600">R$ {margemContribuicao.toFixed(2)}</h3>
+                  </div>
+
+                  <div className="bg-background border border-border p-5 rounded-xl shadow-sm flex flex-col justify-center">
+                    <p className="text-sm font-medium text-muted-foreground mb-1">Lucro Líquido</p>
+                    <h3 className="text-3xl font-semibold text-primary">R$ {valorMargem.toFixed(2)}</h3>
                   </div>
 
                   <div className="bg-background border border-border p-4 rounded-xl shadow-sm flex flex-col justify-center">
