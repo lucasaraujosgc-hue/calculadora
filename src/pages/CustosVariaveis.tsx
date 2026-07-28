@@ -7,6 +7,7 @@ export default function CustosVariaveis() {
   const [novoNome, setNovoNome] = useState('');
   const [novoCmv, setNovoCmv] = useState('');
   const [vendasProjetadas, setVendasProjetadas] = useState('');
+  const [isConfirmingClear, setIsConfirmingClear] = useState(false);
 
   const handleAdd = () => {
     if (!novoNome || !novoCmv) return;
@@ -14,7 +15,12 @@ export default function CustosVariaveis() {
       id: Date.now().toString(), 
       nome: novoNome, 
       cmv: Number(novoCmv),
-      vendasProjetadas: Number(vendasProjetadas) || 0
+      vendasProjetadas: Number(vendasProjetadas) || 0,
+      imposto: 0,
+      taxaCartao: 0,
+      comissao: 0,
+      margem: 0,
+      percentualRateio: 0
     };
     setProdutos([...produtos, item]);
     setNovoNome('');
@@ -26,29 +32,63 @@ export default function CustosVariaveis() {
     setProdutos(produtos.filter(p => p.id !== id));
   };
 
+  const handleClear = () => {
+    if (!isConfirmingClear) {
+      setIsConfirmingClear(true);
+      setTimeout(() => setIsConfirmingClear(false), 3000);
+      return;
+    }
+    setProdutos([]);
+    setIsConfirmingClear(false);
+  };
+
   return (
     <div className="space-y-6 pb-12">
       <div>
-        <h1 className="text-3xl font-serif text-primary">Custos Variáveis & Produtos</h1>
-        <p className="text-muted-foreground mt-1 text-sm">Cadastre seus produtos e seus custos de aquisição ou fabricação (CMV).</p>
+        <h1 className="text-3xl font-serif text-primary">Produtos</h1>
+        <p className="text-muted-foreground mt-1 text-sm">Cadastre seus produtos ou serviços e seus custos variáveis (aquisição, produção ou execução).</p>
+      </div>
+
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 shadow-sm text-sm text-blue-900">
+        <h3 className="font-bold mb-2 flex items-center gap-2">
+          O que é o Custo Variável?
+        </h3>
+        <p className="mb-3">
+          Custos variáveis são aqueles que variam diretamente com o volume de vendas ou produção. Ou seja, se você não vender ou não produzir, não terá esse custo. 
+          Eles devem ser inseridos por unidade (por produto ou por serviço prestado).
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+          <div className="bg-white/60 p-3 rounded-lg">
+            <h4 className="font-semibold text-blue-950 mb-1">🏪 Comércio (CMV)</h4>
+            <p className="text-xs">Custo da Mercadoria Vendida. Inclui o valor pago ao fornecedor pelo produto, fretes sobre a compra e embalagens de envio (ex: caixas de e-commerce).</p>
+          </div>
+          <div className="bg-white/60 p-3 rounded-lg">
+            <h4 className="font-semibold text-blue-950 mb-1">🏭 Indústria (CPV)</h4>
+            <p className="text-xs">Custo do Produto Vendido. Inclui matéria-prima, insumos de fabricação e embalagens do produto.</p>
+          </div>
+          <div className="bg-white/60 p-3 rounded-lg">
+            <h4 className="font-semibold text-blue-950 mb-1">💼 Serviços (CSP)</h4>
+            <p className="text-xs">Custo do Serviço Prestado. Inclui materiais gastos durante a prestação, combustível/deslocamento específico até o cliente e terceirizações por job.</p>
+          </div>
+        </div>
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden mt-6">
-        <div className="p-6 border-b border-border bg-muted/30">
-          <h3 className="text-lg font-medium text-foreground mb-4">Adicionar Produto</h3>
+         <div className="p-6 border-b border-border bg-muted/30">
+          <h3 className="text-lg font-medium text-foreground mb-4">Adicionar Produto/Serviço</h3>
           <div className="flex flex-col md:flex-row gap-4">
              <div className="flex-1">
-               <label className="block text-xs font-medium text-muted-foreground mb-1">Nome do Produto</label>
+               <label className="block text-xs font-medium text-muted-foreground mb-1">Nome</label>
                <input 
                  type="text" 
-                 placeholder="Ex: Camiseta Básica" 
+                 placeholder="Ex: Camiseta ou Consultoria" 
                  value={novoNome} 
                  onChange={e => setNovoNome(e.target.value)} 
                  className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm" 
                />
              </div>
              <div className="w-full md:w-48">
-               <label className="block text-xs font-medium text-muted-foreground mb-1">Custo de Aquisição (R$)</label>
+               <label className="block text-xs font-medium text-muted-foreground mb-1">Custo Variável (Unidade)</label>
                <input 
                  type="number" 
                  placeholder="Ex: 35.00" 
@@ -79,8 +119,8 @@ export default function CustosVariaveis() {
           <table className="w-full text-sm text-left">
             <thead className="bg-muted/50 text-muted-foreground font-medium border-b border-border">
               <tr>
-                <th className="px-6 py-4">Nome do Produto</th>
-                <th className="px-6 py-4">Custo Variável (CMV)</th>
+                <th className="px-6 py-4">Produto / Serviço</th>
+                <th className="px-6 py-4">Custo Variável Unit. (R$)</th>
                 <th className="px-6 py-4">Vendas Projetadas/Mês</th>
                 <th className="px-6 py-4 w-20">Ações</th>
               </tr>
@@ -101,12 +141,28 @@ export default function CustosVariaveis() {
               {produtos.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
-                    Nenhum produto cadastrado. Adicione seu primeiro produto acima.
+                    Nenhum item cadastrado. Adicione seu primeiro produto ou serviço acima.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          
+          {produtos.length > 0 && (
+            <div className="p-4 border-t border-border bg-muted/10 flex justify-end">
+              <button 
+                onClick={handleClear}
+                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  isConfirmingClear 
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' 
+                    : 'text-red-600 bg-red-50 hover:bg-red-100 border border-red-200'
+                }`}
+              >
+                <Trash2 className="w-4 h-4" />
+                {isConfirmingClear ? 'Confirmar Exclusão?' : 'Limpar Todos os Produtos'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

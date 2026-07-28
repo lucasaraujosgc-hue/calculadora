@@ -39,10 +39,15 @@ export default function MixPreco() {
     const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
 
     const despesasVariaveisPerc = imposto + taxaCartao + comissao;
-    const totalPerc = despesasVariaveisPerc + margem;
-    const divisor = (100 - totalPerc) / 100;
+    let preco = 0;
     
-    const preco = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
+    if (p.modoPrecificacao === 'preco') {
+      preco = p.precoFixo || 0;
+    } else {
+      const totalPerc = despesasVariaveisPerc + margem;
+      const divisor = (100 - totalPerc) / 100;
+      preco = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
+    }
     
     const valorImposto = preco * (imposto / 100);
     const valorTaxa = preco * (taxaCartao / 100);
@@ -161,16 +166,27 @@ export default function MixPreco() {
           const custoFixoUnitario = vendasProjetadas > 0 ? (valorRateadoCF / vendasProjetadas) : 0;
 
           const despesasVariaveisPerc = imposto + taxaCartao + comissao;
-          const totalPerc = despesasVariaveisPerc + margem;
-          const divisor = (100 - totalPerc) / 100;
           
-          const preco = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
+          let precoFinal = 0;
+          let margemReal = margem;
+
+          if (p.modoPrecificacao === 'preco') {
+            precoFinal = p.precoFixo || 0;
+            const custoTot = p.cmv + custoFixoUnitario;
+            const descontosVariaveis = precoFinal * (despesasVariaveisPerc / 100);
+            const lucroReais = precoFinal - custoTot - descontosVariaveis;
+            margemReal = precoFinal > 0 ? (lucroReais / precoFinal) * 100 : 0;
+          } else {
+            const totalPerc = despesasVariaveisPerc + margem;
+            const divisor = (100 - totalPerc) / 100;
+            precoFinal = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
+          }
           
-          const valorImposto = preco * (imposto / 100);
-          const valorTaxa = preco * (taxaCartao / 100);
-          const valorComissao = preco * (comissao / 100);
-          const valorMargem = preco * (margem / 100);
-          const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao;
+          const valorImposto = precoFinal * (imposto / 100);
+          const valorTaxa = precoFinal * (taxaCartao / 100);
+          const valorComissao = precoFinal * (comissao / 100);
+          const valorMargem = precoFinal * (margemReal / 100);
+          const margemContribuicao = precoFinal - p.cmv - valorImposto - valorTaxa - valorComissao;
           
           // Ponto de equilíbrio específico para este produto com base no SEU rateio
           const isValidMargem = margemContribuicao > 0;
@@ -220,6 +236,23 @@ export default function MixPreco() {
                     <label className="block text-sm font-medium text-foreground mb-1">Custo de Aquisição (CMV)</label>
                     <input type="number" value={p.cmv} onChange={(e) => handleUpdateProduto(p.id, 'cmv', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                   </div>
+
+                  <div className="flex gap-2 mt-4 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateProduto(p.id, 'modoPrecificacao', 'margem' as any)}
+                      className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded transition-colors ${(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground hover:bg-muted'}`}
+                    >
+                      Calcular por Margem
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateProduto(p.id, 'modoPrecificacao', 'preco' as any)}
+                      className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded transition-colors ${p.modoPrecificacao === 'preco' ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground hover:bg-muted'}`}
+                    >
+                      Preço Fixo
+                    </button>
+                  </div>
                   
                   <div className="grid grid-cols-2 gap-4 pt-2">
                     <div>
@@ -241,27 +274,48 @@ export default function MixPreco() {
                       <input type="number" value={comissao} onChange={(e) => handleUpdateProduto(p.id, 'comissao', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">Margem Líquida (%)</label>
-                      <input type="number" value={margem} onChange={(e) => handleUpdateProduto(p.id, 'margem', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background font-bold text-primary text-sm" />
+                      {(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? (
+                        <>
+                          <label className="block text-xs font-medium text-muted-foreground mb-1">Margem Líquida (%)</label>
+                          <input type="number" value={margem} onChange={(e) => handleUpdateProduto(p.id, 'margem', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
+                        </>
+                      ) : (
+                        <>
+                          <label className="block text-xs font-medium text-muted-foreground mb-1">Preço Venda (R$)</label>
+                          <input type="number" value={p.precoFixo || 0} onChange={(e) => handleUpdateProduto(p.id, 'precoFixo', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 {/* Preço e M.C. */}
                 <div className="col-span-1 lg:col-span-4 space-y-4">
-                  <div className="bg-primary border border-primary/20 p-5 rounded-xl text-primary-foreground shadow-sm">
-                    <p className="text-sm font-medium opacity-80 mb-1">Preço de Venda Ideal</p>
-                    <h3 className="text-4xl font-bold">R$ {preco.toFixed(2)}</h3>
+                  <div className={`border p-5 rounded-xl shadow-sm ${(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? 'bg-primary border-primary/20 text-primary-foreground' : 'bg-card border-border'}`}>
+                    <p className={`text-sm font-medium mb-1 ${(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? 'opacity-80' : 'text-muted-foreground'}`}>
+                      {(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? 'Preço de Venda Ideal' : 'Preço de Venda Fixo'}
+                    </p>
+                    <h3 className={`text-4xl font-bold ${p.modoPrecificacao === 'preco' ? 'text-foreground' : ''}`}>R$ {precoFinal.toFixed(2)}</h3>
                   </div>
                   
                   <div className="bg-background border border-border p-5 rounded-xl shadow-sm flex flex-col justify-center">
                     <p className="text-sm font-medium text-muted-foreground mb-1">Margem de Contribuição</p>
-                    <h3 className="text-3xl font-semibold text-emerald-600">R$ {margemContribuicao.toFixed(2)}</h3>
+                    <h3 className={`text-3xl font-semibold ${margemContribuicao >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>R$ {margemContribuicao.toFixed(2)}</h3>
                   </div>
 
                   <div className="bg-background border border-border p-5 rounded-xl shadow-sm flex flex-col justify-center">
-                    <p className="text-sm font-medium text-muted-foreground mb-1">Lucro Líquido</p>
-                    <h3 className="text-3xl font-semibold text-primary">R$ {valorMargem.toFixed(2)}</h3>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground mb-1">Lucro Líquido</p>
+                        <h3 className={`text-3xl font-semibold ${valorMargem >= 0 ? 'text-primary' : 'text-red-600'}`}>R$ {valorMargem.toFixed(2)}</h3>
+                      </div>
+                      {p.modoPrecificacao === 'preco' && (
+                        <div className="text-right">
+                          <p className="text-sm font-medium text-muted-foreground mb-1">Margem %</p>
+                          <h3 className={`text-xl font-semibold ${margemReal >= 0 ? 'text-primary' : 'text-red-600'}`}>{margemReal.toFixed(1)}%</h3>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="bg-background border border-border p-4 rounded-xl shadow-sm flex flex-col justify-center">

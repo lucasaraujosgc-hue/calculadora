@@ -14,6 +14,8 @@ export default function FormacaoPreco() {
   const [comissao, setComissao] = useState(2);
   const [margem, setMargem] = useState(20);
   const [vendasProjetadas, setVendasProjetadas] = useState(100);
+  const [modoPrecificacao, setModoPrecificacao] = useState<'margem' | 'preco'>('margem');
+  const [precoFixo, setPrecoFixo] = useState(0);
 
   const custoFixoTotal = custosFixos.reduce((acc, curr) => acc + curr.valor, 0);
 
@@ -29,6 +31,8 @@ export default function FormacaoPreco() {
     if (p) {
       setCusto(p.cmv);
       setVendasProjetadas(p.vendasProjetadas || 100);
+      setModoPrecificacao(p.modoPrecificacao || 'margem');
+      setPrecoFixo(p.precoFixo || 0);
       if (p.imposto !== undefined) setImposto(p.imposto);
       if (p.taxaCartao !== undefined) setTaxaCartao(p.taxaCartao);
       if (p.comissao !== undefined) setComissao(p.comissao);
@@ -40,7 +44,18 @@ export default function FormacaoPreco() {
   const handleSaveToProduct = () => {
     const updated = produtos.map(p => {
       if (p.id === selectedProductId) {
-        return { ...p, cmv: custo, vendasProjetadas, imposto, taxaCartao, comissao, margem, precoIdeal: preco };
+        return { 
+          ...p, 
+          cmv: custo, 
+          vendasProjetadas, 
+          imposto, 
+          taxaCartao, 
+          comissao, 
+          margem, 
+          precoIdeal: precoFinal,
+          modoPrecificacao,
+          precoFixo
+        };
       }
       return p;
     });
@@ -55,14 +70,25 @@ export default function FormacaoPreco() {
   const totalPerc = despesasVariaveisPerc + margem;
   const divisor = (100 - totalPerc) / 100;
   
-  const preco = divisor > 0 ? ((custo + custoFixoUnitario) / divisor) : 0;
+  const precoIdealCalculado = divisor > 0 ? ((custo + custoFixoUnitario) / divisor) : 0;
   
-  const valorImposto = preco * (imposto / 100);
-  const valorTaxa = preco * (taxaCartao / 100);
-  const valorComissao = preco * (comissao / 100);
-  const valorMargem = preco * (margem / 100);
+  let precoFinal = precoIdealCalculado;
+  let margemReal = margem;
+
+  if (modoPrecificacao === 'preco') {
+    precoFinal = precoFixo;
+    const custoTot = custo + custoFixoUnitario;
+    const descontosVariaveis = precoFinal * (despesasVariaveisPerc / 100);
+    const lucroLiquidoReais = precoFinal - custoTot - descontosVariaveis;
+    margemReal = precoFinal > 0 ? (lucroLiquidoReais / precoFinal) * 100 : 0;
+  }
   
-  const margemContribuicao = preco - custo - valorImposto - valorTaxa - valorComissao; 
+  const valorImposto = precoFinal * (imposto / 100);
+  const valorTaxa = precoFinal * (taxaCartao / 100);
+  const valorComissao = precoFinal * (comissao / 100);
+  const valorMargem = precoFinal * (margemReal / 100);
+  
+  const margemContribuicao = precoFinal - custo - valorImposto - valorTaxa - valorComissao; 
   
   const isValidMargem = margemContribuicao > 0;
   const peUnidades = isValidMargem ? (custoFixoTotal / margemContribuicao) : Infinity;
@@ -97,9 +123,9 @@ export default function FormacaoPreco() {
     const qty = Math.round(peUnidades * mult);
     return {
       unidades: qty,
-      receita: qty * preco,
-      custoTotal: custoFixoTotal + (qty * custo) + (qty * (preco * ((imposto + taxaCartao + comissao)/100))),
-      lucro: (qty * preco) - (custoFixoTotal + (qty * custo) + (qty * (preco * ((imposto + taxaCartao + comissao)/100))))
+      receita: qty * precoFinal,
+      custoTotal: custoFixoTotal + (qty * custo) + (qty * (precoFinal * ((imposto + taxaCartao + comissao)/100))),
+      lucro: (qty * precoFinal) - (custoFixoTotal + (qty * custo) + (qty * (precoFinal * ((imposto + taxaCartao + comissao)/100))))
     };
   });
 
@@ -133,19 +159,36 @@ export default function FormacaoPreco() {
               </select>
             </div>
 
-            <div className="pt-4 border-t border-border">
-              <label className="block text-sm font-medium text-foreground mb-1">Custo de Aquisição/Fabricação (CMV)</label>
-              <input type="number" value={custo} onChange={e => setCusto(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1">Vendas Projetadas (Mês)</label>
-              <input type="number" value={vendasProjetadas} onChange={e => setVendasProjetadas(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
+            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Custo de Aquisição/Fabricação (CMV)</label>
+                <input type="number" value={custo} onChange={e => setCusto(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Vendas Projetadas (Mês)</label>
+                <input type="number" value={vendasProjetadas} onChange={e => setVendasProjetadas(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
+              </div>
             </div>
 
-            <h3 className="text-sm font-medium text-foreground pt-4 border-t border-border">Despesas Variáveis & Margem (%)</h3>
-            
-            <div className="grid grid-cols-2 gap-4">
+            <h3 className="text-sm font-medium text-foreground pt-4 border-t border-border">Estratégia de Precificação</h3>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setModoPrecificacao('margem')}
+                className={`flex-1 py-2 px-3 text-xs font-semibold rounded-md transition-colors ${modoPrecificacao === 'margem' ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground hover:bg-muted'}`}
+              >
+                1. Calcular Preço Ideal
+              </button>
+              <button
+                type="button"
+                onClick={() => setModoPrecificacao('preco')}
+                className={`flex-1 py-2 px-3 text-xs font-semibold rounded-md transition-colors ${modoPrecificacao === 'preco' ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground hover:bg-muted'}`}
+              >
+                2. Simular Preço de Venda
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Impostos (%)</label>
                 <input type="number" value={imposto} onChange={e => setImposto(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
@@ -159,8 +202,17 @@ export default function FormacaoPreco() {
                 <input type="number" value={comissao} onChange={e => setComissao(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Margem Líquida (%)</label>
-                <input type="number" value={margem} onChange={e => setMargem(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background font-bold text-primary text-sm" />
+                {modoPrecificacao === 'margem' ? (
+                  <>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Margem Líquida Desejada (%)</label>
+                    <input type="number" value={margem} onChange={e => setMargem(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
+                  </>
+                ) : (
+                  <>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Preço de Venda Praticado (R$)</label>
+                    <input type="number" value={precoFixo} onChange={e => setPrecoFixo(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
+                  </>
+                )}
               </div>
             </div>
 
@@ -173,31 +225,57 @@ export default function FormacaoPreco() {
         {/* Resultados */}
         <div className="col-span-1 lg:col-span-8 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-             <div className="bg-primary border border-primary/20 p-5 rounded-xl text-primary-foreground shadow-sm">
-                <p className="text-sm font-medium opacity-80 mb-1">Preço de Venda Ideal</p>
-                <h3 className="text-4xl font-bold">R$ {preco.toFixed(2)}</h3>
+             <div className={`border p-5 rounded-xl shadow-sm ${modoPrecificacao === 'margem' ? 'bg-primary border-primary/20 text-primary-foreground' : 'bg-card border-border'}`}>
+                <p className={`text-sm font-medium mb-1 ${modoPrecificacao === 'margem' ? 'opacity-80' : 'text-muted-foreground'}`}>
+                  {modoPrecificacao === 'margem' ? 'Preço de Venda Ideal' : 'Preço de Venda Simulado'}
+                </p>
+                <h3 className={`text-4xl font-bold ${modoPrecificacao === 'preco' ? 'text-foreground' : ''}`}>R$ {precoFinal.toFixed(2)}</h3>
              </div>
              
              <div className="bg-card border border-border p-5 rounded-xl shadow-sm">
                 <p className="text-sm font-medium text-muted-foreground mb-1">Margem de Contribuição</p>
-                <h3 className="text-3xl font-semibold text-emerald-600">R$ {margemContribuicao.toFixed(2)}</h3>
+                <h3 className={`text-3xl font-semibold ${margemContribuicao > 0 ? 'text-emerald-600' : 'text-red-600'}`}>R$ {margemContribuicao.toFixed(2)}</h3>
                 <p className="text-xs text-muted-foreground mt-1">Valor que sobra para pagar Custos Fixos e gerar Lucro.</p>
              </div>
 
-             <div className="bg-card border border-border p-5 rounded-xl shadow-sm md:col-span-2">
-                <p className="text-sm font-medium text-muted-foreground mb-1">Lucro Líquido (por unidade)</p>
-                <h3 className="text-3xl font-semibold text-primary">R$ {valorMargem.toFixed(2)}</h3>
-                <p className="text-xs text-muted-foreground mt-1">O lucro real após descontar sua cota de custo fixo (estimativa).</p>
+             <div className={`border p-5 rounded-xl shadow-sm md:col-span-2 ${modoPrecificacao === 'preco' ? 'bg-primary/5 border-primary/20' : 'bg-card border-border'}`}>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground mb-1">Lucro Líquido (por unidade)</p>
+                    <h3 className={`text-3xl font-semibold ${valorMargem >= 0 ? 'text-primary' : 'text-red-600'}`}>
+                      R$ {valorMargem.toFixed(2)}
+                    </h3>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-medium text-muted-foreground mb-1">Margem Realizada (%)</p>
+                    <h3 className={`text-3xl font-semibold ${margemReal >= 0 ? 'text-primary' : 'text-red-600'}`}>
+                      {margemReal.toFixed(1)}%
+                    </h3>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">O lucro real após descontar sua cota de custo fixo (estimativa).</p>
              </div>
           </div>
 
           <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
-            <h3 className="text-lg font-medium text-primary mb-6">Ponto de Equilíbrio (Break-Even)</h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-primary">Ponto de Equilíbrio (Break-Even)</h3>
+            </div>
+            
+            <div className="mb-6 p-3 bg-primary/10 border border-primary/20 rounded-lg">
+              <p className="text-sm text-primary/80 font-medium flex gap-2 items-start">
+                <span className="shrink-0 mt-0.5">ℹ️</span>
+                <span>
+                  <strong>Nota sobre Custos Fixos:</strong> Esta projeção individual considera, para fins de cálculo, que <strong>apenas este produto</strong> será responsável por pagar 100% das despesas fixas do negócio. Para ratear os custos entre vários produtos, acesse a aba "Preços em Lote".
+                </span>
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
                <div>
                   <p className="text-sm font-medium text-muted-foreground mb-1">Total de Custos Fixos</p>
                   <p className="text-2xl font-bold text-foreground">R$ {custoFixoTotal.toFixed(2)}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Soma de todas as despesas da aba Custos Fixos.</p>
+                  <p className="text-xs text-muted-foreground mt-1">Soma de todas as despesas da operação.</p>
                </div>
                <div>
                   <p className="text-sm font-medium text-muted-foreground mb-1">Ponto de Equilíbrio (Unidades)</p>
