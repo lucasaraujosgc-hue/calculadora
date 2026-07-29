@@ -400,6 +400,95 @@ app.post("/api/change-password", async (req, res) => {
   }
 });
 
+app.post("/api/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "E-mail é obrigatório." });
+
+    const users = getUsers();
+    const userIndex = users.findIndex((u: any) => u.email === email);
+    
+    if (userIndex === -1) {
+      return res.status(404).json({ error: "E-mail não encontrado." });
+    }
+
+    const resetToken = crypto.randomBytes(20).toString('hex');
+    users[userIndex].resetToken = resetToken;
+    saveUsers(users);
+
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      const fromName = process.env.SMTP_FROM_NAME || "Recuperação de Senha - Vírgula Contábil";
+      const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+      
+      const appHost = req.get('host') || 'localhost:3000';
+      const protocol = req.protocol || 'http';
+      const resetLink = `${protocol}://${appHost}/reset-password?token=${resetToken}`;
+      
+      try {
+        await transporter.sendMail({
+          from: `"${fromName}" <${fromEmail}>`,
+          to: email,
+          subject: "Recuperação de Senha - Vírgula Contábil",
+          text: `Olá ${users[userIndex].name},\n\nPara redefinir sua senha, clique no link a seguir: ${resetLink}\n\nAtenciosamente,\nEquipe Vírgula Contábil`,
+          html: `
+            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden;">
+              <div style="background-color: #10b981; padding: 20px; text-align: center;">
+                <h2 style="color: #fff; margin: 0;">Recuperação de Senha</h2>
+              </div>
+              <div style="padding: 30px;">
+                <p>Olá <strong>${users[userIndex].name}</strong>,</p>
+                <p>Recebemos uma solicitação para redefinir sua senha na plataforma Vírgula Contábil.</p>
+                <p>Para criar uma nova senha, clique no botão abaixo:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${resetLink}" style="background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">Redefinir Senha</a>
+                </div>
+                <p>Ou acesse pelo link: <a href="${resetLink}">${resetLink}</a></p>
+                <p>Se você não solicitou esta alteração, apenas ignore este e-mail.</p>
+                <br/>
+                <p>Atenciosamente,</p>
+                <p><strong>Equipe Vírgula Contábil</strong></p>
+              </div>
+            </div>
+          `
+        });
+      } catch (mailError) {
+        console.error("Mail send error:", mailError);
+      }
+    }
+    
+    res.json({ success: true, message: "Instruções de recuperação enviadas para seu e-mail." });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/api/reset-password", async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: "Dados incompletos." });
+
+    const users = getUsers();
+    const userIndex = users.findIndex((u: any) => u.resetToken === token);
+    
+    if (userIndex === -1) {
+      return res.status(400).json({ error: "Token inválido ou expirado." });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const newPasswordHash = await bcrypt.hash(password, salt);
+    
+    users[userIndex].passwordHash = newPasswordHash;
+    users[userIndex].resetToken = null; // consume token
+    saveUsers(users);
+    
+    res.json({ success: true, message: "Senha redefinida com sucesso." });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Vite middleware for development
 async function setupVite() {
   let vite: any;

@@ -11,6 +11,7 @@ import CustoFixo from './pages/CustoFixo';
 import CustosVariaveis from './pages/CustosVariaveis';
 import SimuladorImpostos from './pages/SimuladorImpostos';
 import VerifyEmail from './pages/VerifyEmail';
+import ResetPassword from './pages/ResetPassword';
 import AdminPanel from './pages/AdminPanel';
 import { useAppContext } from './context/AppContext';
 
@@ -30,6 +31,7 @@ export default function App() {
       <Routes>
         <Route path="/auth" element={<AuthScreen />} />
         <Route path="/verify" element={<VerifyEmail />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/configuracoes" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/formacao-preco" element={<ProtectedRoute><FormacaoPreco /></ProtectedRoute>} />

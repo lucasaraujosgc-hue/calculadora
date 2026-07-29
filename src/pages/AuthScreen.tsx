@@ -8,6 +8,7 @@ export default function AuthScreen() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -19,6 +20,30 @@ export default function AuthScreen() {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isForgotPassword) {
+       if (!email) return alert('Preencha seu e-mail');
+       setIsLoading(true);
+       try {
+         const res = await fetch('/api/forgot-password', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ email }),
+         });
+         
+         const data = await res.json();
+         if (!res.ok) throw new Error(data.error || 'Erro ao solicitar recuperação de senha');
+         
+         alert(data.message || 'Instruções enviadas para seu e-mail.');
+         setIsForgotPassword(false);
+       } catch (err: any) {
+         alert(err.message || 'Houve um erro ao solicitar a recuperação.');
+         console.error(err);
+       } finally {
+         setIsLoading(false);
+       }
+       return;
+    }
+    
     if (isRegistering) {
        if (!name || !email || !phone) return alert('Preencha todos os campos');
        
@@ -80,87 +105,124 @@ export default function AuthScreen() {
         </div>
         
         <h2 className="text-2xl font-serif text-center text-primary mb-6">
-          {isRegistering ? 'Criar Conta' : 'Acessar Conta'}
+          {isForgotPassword ? 'Recuperar Senha' : (isRegistering ? 'Criar Conta' : 'Acessar Conta')}
         </h2>
         
         <form onSubmit={handleAuth} className="space-y-4">
-          {isRegistering && (
+          {isForgotPassword ? (
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">E-mail</label>
+              <input 
+                type="email" 
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="seu@email.com"
+              />
+              <p className="text-xs text-muted-foreground mt-2">
+                Enviaremos um link para o seu e-mail para que você possa redefinir sua senha.
+              </p>
+            </div>
+          ) : (
             <>
+              {isRegistering && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">Nome Completo</label>
+                    <input 
+                      type="text" 
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      placeholder="Seu nome"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">Telefone</label>
+                    <input 
+                      type="text" 
+                      value={phone}
+                      onChange={e => setPhone(e.target.value)}
+                      className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      placeholder="(00) 00000-0000"
+                    />
+                  </div>
+                </>
+              )}
+              
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Nome Completo</label>
+                <label className="block text-sm font-medium text-foreground mb-1">E-mail</label>
                 <input 
-                  type="text" 
-                  value={name}
-                  onChange={e => setName(e.target.value)}
+                  type="email" 
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
                   className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  placeholder="Seu nome"
+                  placeholder="seu@email.com"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Telefone</label>
-                <input 
-                  type="text" 
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                  className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  placeholder="(00) 00000-0000"
-                />
-              </div>
+              
+              {!isRegistering && (
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">Senha</label>
+                  <input 
+                    type="password" 
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    placeholder="••••••••"
+                  />
+                  <div className="flex justify-end mt-1">
+                    <button 
+                      type="button"
+                      onClick={() => setIsForgotPassword(true)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Esqueceu a senha?
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isRegistering && (
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="rememberMe" 
+                    checked={rememberMe}
+                    onChange={e => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 text-primary border-border rounded focus:ring-primary/50"
+                  />
+                  <label htmlFor="rememberMe" className="text-sm font-medium text-foreground">
+                    Manter-se conectado
+                  </label>
+                </div>
+              )}
             </>
           )}
           
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">E-mail</label>
-            <input 
-              type="email" 
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-              placeholder="seu@email.com"
-            />
-          </div>
-          
-          {!isRegistering && (
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1">Senha</label>
-              <input 
-                type="password" 
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                placeholder="••••••••"
-              />
-            </div>
-          )}
-
-          {!isRegistering && (
-            <div className="flex items-center gap-2">
-              <input 
-                type="checkbox" 
-                id="rememberMe" 
-                checked={rememberMe}
-                onChange={e => setRememberMe(e.target.checked)}
-                className="w-4 h-4 text-primary border-border rounded focus:ring-primary/50"
-              />
-              <label htmlFor="rememberMe" className="text-sm font-medium text-foreground">
-                Manter-se conectado
-              </label>
-            </div>
-          )}
-          
           <button type="submit" disabled={isLoading} className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 transition-colors disabled:opacity-50">
-            {isLoading ? 'Aguarde...' : (isRegistering ? 'Cadastrar' : 'Entrar')}
+            {isLoading ? 'Aguarde...' : (isForgotPassword ? 'Enviar Link' : (isRegistering ? 'Cadastrar' : 'Entrar'))}
           </button>
         </form>
         
         <div className="mt-6 flex flex-col items-center gap-4">
-          <button 
-            type="button"
-            onClick={() => setIsRegistering(!isRegistering)}
-            className="text-sm text-primary hover:underline"
-          >
-            {isRegistering ? 'Já tem conta? Faça login' : 'Não tem conta? Cadastre-se'}
-          </button>
+          {isForgotPassword ? (
+            <button 
+              type="button"
+              onClick={() => setIsForgotPassword(false)}
+              className="text-sm text-primary hover:underline"
+            >
+              Voltar para o login
+            </button>
+          ) : (
+            <button 
+              type="button"
+              onClick={() => setIsRegistering(!isRegistering)}
+              className="text-sm text-primary hover:underline"
+            >
+              {isRegistering ? 'Já tem conta? Faça login' : 'Não tem conta? Cadastre-se'}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -258,12 +258,14 @@ const NOME_ESTADO: Record<string, string> = {
   SP: 'São Paulo', SE: 'Sergipe', TO: 'Tocantins',
 };
 
-// Alíquotas internas (dentro do próprio Estado) — valores de referência, cada
-// Estado pode alterar por lei própria; confirme sempre com seu contador.
+// Alíquotas internas (dentro do próprio Estado) — tabela ICMS 2026 atualizada
+// (fonte: https://contaazul.com/blog/tabela-de-aliquota-interestadual/,
+// atualizada em 13/03/2026). Alagoas passa a 20,5% a partir de 01/04/2026.
+// Cada Estado pode alterar por lei própria; confirme sempre com seu contador.
 const ALIQUOTA_INTERNA: Record<string, number> = {
-  AC: 19, AL: 19, AP: 18, AM: 20, BA: 19, CE: 20, DF: 20, ES: 17, GO: 19, MA: 22,
-  MT: 17, MS: 17, MG: 18, PA: 19, PB: 20, PR: 19.5, PE: 20.5, PI: 21, RJ: 20,
-  RN: 18, RS: 17, RO: 19.5, RR: 20, SC: 17, SP: 18, SE: 19, TO: 20,
+  AC: 19, AL: 20.5, AP: 18, AM: 20, BA: 20.5, CE: 20, DF: 20, ES: 17, GO: 19, MA: 23,
+  MT: 17, MS: 17, MG: 18, PA: 19, PB: 20, PR: 19.5, PE: 20.5, PI: 22.5, RJ: 20,
+  RN: 20, RS: 17, RO: 19.5, RR: 20, SC: 17, SP: 18, SE: 19, TO: 20,
 };
 
 function regiaoDoEstado(uf: string): string {
