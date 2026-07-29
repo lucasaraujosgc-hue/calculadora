@@ -27,11 +27,32 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     menuItems.push({ name: 'Administração', path: '/admin', icon: Users, highlight: 'bg-blue-500/10 text-blue-600 border-blue-500/20' });
   }
 
-  const SidebarContent = ({ isMobile = false, isCollapsed = false }: { isMobile?: boolean, isCollapsed?: boolean }) => (
+  const SidebarContent = ({ isMobile = false, isCollapsed = false, onToggleDesktop }: { isMobile?: boolean, isCollapsed?: boolean, onToggleDesktop?: () => void }) => (
     <>
-      <div className={`py-4 flex flex-col items-center justify-center border-b border-border shrink-0`}>
-        {!isCollapsed && <Logo />}
-        {isCollapsed && <Menu className="w-6 h-6 text-primary mt-2" />}
+      <div className={`py-4 flex flex-col items-center justify-center border-b border-border shrink-0 relative`}>
+        {!isCollapsed && (
+          <>
+            <Logo />
+            {!isMobile && (
+              <button 
+                onClick={onToggleDesktop}
+                className="absolute top-2 right-2 p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
+                title="Recolher menu"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
+          </>
+        )}
+        {isCollapsed && !isMobile && (
+          <button 
+            onClick={onToggleDesktop}
+            className="p-2 text-primary hover:bg-muted rounded-md transition-colors mt-2"
+            title="Expandir menu"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+        )}
         {isMobile && (
           <button 
             onClick={() => setIsMobileMenuOpen(false)}
@@ -99,10 +120,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Sidebar Desktop */}
       <aside 
         className={`bg-card border-r border-border flex-col hidden md:flex shrink-0 transition-all duration-300 relative z-30 ${isDesktopMenuOpen ? 'w-64' : 'w-16'}`}
-        onMouseEnter={() => !isDesktopMenuOpen && setIsDesktopMenuOpen(true)}
-        onMouseLeave={() => isDesktopMenuOpen && setIsDesktopMenuOpen(false)}
       >
-        <SidebarContent isCollapsed={!isDesktopMenuOpen} />
+        <SidebarContent isCollapsed={!isDesktopMenuOpen} onToggleDesktop={() => setIsDesktopMenuOpen(!isDesktopMenuOpen)} />
       </aside>
 
       {/* Sidebar Mobile */}
@@ -129,8 +148,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
         </header>
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-           <div className="max-w-6xl mx-auto">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+           <div className="w-full max-w-[1600px] mx-auto">
               {children}
            </div>
         </div>

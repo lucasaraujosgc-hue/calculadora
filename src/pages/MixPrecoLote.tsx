@@ -55,6 +55,41 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'margem', label: 'Margem (%)' },
 ];
 
+const PriceInput = ({ 
+  p, 
+  onUpdate 
+}: { 
+  p: any, 
+  onUpdate: (id: string, updates: Partial<ProdutoItem>) => void 
+}) => {
+  const [val, setVal] = useState<string>(
+    p.modoPrecificacao === 'preco' ? String(p.precoFixo || '') : p.preco.toFixed(2)
+  );
+
+  useEffect(() => {
+    if (p.modoPrecificacao !== 'preco') {
+      setVal(p.preco.toFixed(2));
+    }
+  }, [p.modoPrecificacao, p.preco]);
+
+  return (
+    <input
+      type="number"
+      step="0.01"
+      value={val}
+      onChange={(e) => {
+        setVal(e.target.value);
+        onUpdate(p.id, {
+          modoPrecificacao: 'preco',
+          precoFixo: Number(e.target.value)
+        });
+      }}
+      className={`w-24 mx-auto block px-2 py-1 border rounded text-sm font-bold text-center focus:ring-2 focus:ring-primary/50 ${p.modoPrecificacao === 'preco' ? 'bg-amber-100 border-amber-400 text-amber-900' : 'bg-background border-border text-foreground'}`}
+      title={p.modoPrecificacao === 'preco' ? 'Preço fixo definido pelo usuário' : 'Preço calculado. Digite para fixar um preço.'}
+    />
+  );
+};
+
 export default function MixPrecoLote() {
   const { produtos, custosFixos, setProdutos } = useAppContext();
 
@@ -93,8 +128,8 @@ export default function MixPrecoLote() {
 
   const custoFixoTotal = custosFixos.reduce((acc, curr) => acc + curr.valor, 0);
 
-  const handleUpdateProduto = (id: string, field: keyof ProdutoItem, value: number) => {
-    const updated = produtos.map(p => (p.id === id ? { ...p, [field]: value } : p));
+  const handleUpdateProduto = (id: string, updates: Partial<ProdutoItem>) => {
+    const updated = produtos.map(p => (p.id === id ? { ...p, ...updates } : p));
     setProdutos(updated);
   };
 
@@ -502,7 +537,7 @@ export default function MixPrecoLote() {
                         <input
                           type="number"
                           value={p.vendas}
-                          onChange={(e) => handleUpdateProduto(p.id, 'vendasProjetadas', Number(e.target.value))}
+                          onChange={(e) => handleUpdateProduto(p.id, { vendasProjetadas: Number(e.target.value) })}
                           className="w-16 mx-auto block px-2 py-1 border border-border rounded bg-muted/30 focus:ring-2 focus:ring-primary/50 text-sm text-center"
                         />
                       </td>
@@ -510,22 +545,13 @@ export default function MixPrecoLote() {
                         <input
                           type="number"
                           value={p.rateio}
-                          onChange={(e) => handleUpdateProduto(p.id, 'percentualRateio', Number(e.target.value))}
+                          onChange={(e) => handleUpdateProduto(p.id, { percentualRateio: Number(e.target.value) })}
                           className={`w-16 mx-auto block px-2 py-1 border rounded text-sm font-bold text-center ${p.semRateio ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-amber-300 text-amber-900'} focus:ring-2 focus:ring-amber-500/50`}
                         />
                       </td>
                       <td className="px-3 py-3 text-center bg-primary/5" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-col items-center">
-                          <input
-                            type="number"
-                            value={p.modoPrecificacao === 'preco' ? (p.precoFixo || 0) : Number(p.preco.toFixed(2))}
-                            onChange={(e) => {
-                              if (p.modoPrecificacao !== 'preco') handleUpdateProduto(p.id, 'modoPrecificacao', 'preco' as any);
-                              handleUpdateProduto(p.id, 'precoFixo', Number(e.target.value));
-                            }}
-                            className={`w-24 mx-auto block px-2 py-1 border rounded text-sm font-bold text-center focus:ring-2 focus:ring-primary/50 ${p.modoPrecificacao === 'preco' ? 'bg-amber-100 border-amber-400 text-amber-900' : 'bg-background border-border text-foreground'}`}
-                            title={p.modoPrecificacao === 'preco' ? 'Preço fixo definido pelo usuário' : 'Preço calculado. Digite para fixar um preço.'}
-                          />
+                          <PriceInput p={p} onUpdate={handleUpdateProduto} />
                           {p.modoPrecificacao === 'preco' && (
                             <span className="text-[9px] text-amber-600 font-bold mt-0.5 uppercase tracking-wider">Manual</span>
                           )}
@@ -544,7 +570,7 @@ export default function MixPrecoLote() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleUpdateProduto(p.id, 'modoPrecificacao', 'margem' as any);
+                                handleUpdateProduto(p.id, { modoPrecificacao: 'margem' });
                               }}
                               className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-amber-300 bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
                               title="Restaurar preço sugerido pela margem"
@@ -576,21 +602,21 @@ export default function MixPrecoLote() {
                                 <input
                                   type="number"
                                   value={p.cmv}
-                                  onChange={(e) => handleUpdateProduto(p.id, 'cmv', Number(e.target.value))}
+                                  onChange={(e) => handleUpdateProduto(p.id, { cmv: Number(e.target.value) })}
                                   className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm"
                                 />
                               </div>
                               <div className="flex gap-2 mt-4 mb-2">
                                 <button
                                   type="button"
-                                  onClick={() => handleUpdateProduto(p.id, 'modoPrecificacao', 'margem' as any)}
+                                  onClick={() => handleUpdateProduto(p.id, { modoPrecificacao: 'margem' })}
                                   className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded transition-colors ${(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground hover:bg-muted'}`}
                                 >
                                   Calcular por Margem
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleUpdateProduto(p.id, 'modoPrecificacao', 'preco' as any)}
+                                  onClick={() => handleUpdateProduto(p.id, { modoPrecificacao: 'preco' })}
                                   className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded transition-colors ${p.modoPrecificacao === 'preco' ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground hover:bg-muted'}`}
                                 >
                                   Preço Fixo
@@ -600,26 +626,26 @@ export default function MixPrecoLote() {
                               <div className="grid grid-cols-2 gap-4 pt-2">
                                 <div>
                                   <label className="block text-xs font-medium text-muted-foreground mb-1">Impostos (%)</label>
-                                  <input type="number" value={p.imposto} onChange={(e) => handleUpdateProduto(p.id, 'imposto', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
+                                  <input type="number" value={p.imposto} onChange={(e) => handleUpdateProduto(p.id, { imposto: Number(e.target.value) })} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                                 </div>
                                 <div>
                                   <label className="block text-xs font-medium text-muted-foreground mb-1">Taxa Cartão (%)</label>
-                                  <input type="number" value={p.taxaCartao} onChange={(e) => handleUpdateProduto(p.id, 'taxaCartao', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
+                                  <input type="number" value={p.taxaCartao} onChange={(e) => handleUpdateProduto(p.id, { taxaCartao: Number(e.target.value) })} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                                 </div>
                                 <div>
                                   <label className="block text-xs font-medium text-muted-foreground mb-1">Outros (Comissão e afins) %</label>
-                                  <input type="number" value={p.comissao} onChange={(e) => handleUpdateProduto(p.id, 'comissao', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
+                                  <input type="number" value={p.comissao} onChange={(e) => handleUpdateProduto(p.id, { comissao: Number(e.target.value) })} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                                 </div>
                                 <div>
                                   {(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? (
                                     <>
                                       <label className="block text-xs font-medium text-muted-foreground mb-1">Margem Líquida (%)</label>
-                                      <input type="number" value={p.margem} onChange={(e) => handleUpdateProduto(p.id, 'margem', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
+                                      <input type="number" value={p.margem} onChange={(e) => handleUpdateProduto(p.id, { margem: Number(e.target.value) })} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
                                     </>
                                   ) : (
                                     <>
                                       <label className="block text-xs font-medium text-muted-foreground mb-1">Preço Venda (R$)</label>
-                                      <input type="number" value={p.precoFixo || 0} onChange={(e) => handleUpdateProduto(p.id, 'precoFixo', Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
+                                      <input type="number" value={p.precoFixo || 0} onChange={(e) => handleUpdateProduto(p.id, { precoFixo: Number(e.target.value) })} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
                                     </>
                                   )}
                                 </div>
