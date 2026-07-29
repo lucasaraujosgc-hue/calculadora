@@ -8,8 +8,13 @@ export default function VerifyEmail() {
   const token = searchParams.get('token');
   const navigate = useNavigate();
   
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [message, setMessage] = useState('Verificando seu e-mail...');
+  const [status, setStatus] = useState<'loading' | 'form' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState('Verificando token...');
+  const [user, setUser] = useState<{name: string, email: string} | null>(null);
+  
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -18,19 +23,15 @@ export default function VerifyEmail() {
       return;
     }
 
-    fetch('/api/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    })
+    fetch(`/api/verify/${token}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
-          setStatus('success');
-          setMessage(data.message || 'Sua conta foi ativada com sucesso!');
+          setUser(data.user);
+          setStatus('form');
         } else {
           setStatus('error');
-          setMessage(data.error || 'Erro ao verificar e-mail.');
+          setMessage(data.error || 'Token inválido ou expirado.');
         }
       })
       .catch(err => {
@@ -39,6 +40,38 @@ export default function VerifyEmail() {
         setMessage('Erro na conexão com o servidor.');
       });
   }, [token]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password !== confirmPassword) {
+      return alert('As senhas não coincidem.');
+    }
+    if (password.length < 6) {
+      return alert('A senha deve ter pelo menos 6 caracteres.');
+    }
+    
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        setStatus('success');
+        setMessage(data.message || 'Sua conta foi ativada com sucesso!');
+      } else {
+        alert(data.error || 'Erro ao ativar conta.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro na conexão com o servidor.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
@@ -53,6 +86,48 @@ export default function VerifyEmail() {
           </div>
         )}
         
+        {status === 'form' && (
+          <div className="flex flex-col text-left">
+            <h2 className="text-2xl font-bold text-foreground mb-2 text-center">Criar Senha</h2>
+            <p className="text-muted-foreground text-center mb-6">
+              Olá {user?.name}, defina sua senha para ativar sua conta.
+            </p>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Nova Senha</label>
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Confirmar Senha</label>
+                <input 
+                  type="password" 
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                />
+              </div>
+              <button 
+                type="submit" 
+                disabled={isSubmitting} 
+                className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 mt-2"
+              >
+                {isSubmitting ? 'Salvando...' : 'Salvar e Ativar Conta'}
+              </button>
+            </form>
+          </div>
+        )}
+
         {status === 'success' && (
           <div className="flex flex-col items-center space-y-4">
             <CheckCircle2 className="w-16 h-16 text-emerald-500" />

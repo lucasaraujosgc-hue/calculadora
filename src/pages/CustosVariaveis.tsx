@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Lock } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import { Link } from 'react-router-dom';
 
 export default function CustosVariaveis() {
-  const { produtos, setProdutos } = useAppContext();
+  const { produtos, setProdutos, isGuest } = useAppContext();
   const [novoNome, setNovoNome] = useState('');
   const [novoCmv, setNovoCmv] = useState('');
   const [vendasProjetadas, setVendasProjetadas] = useState('');
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
 
+  const MAX_PRODUTOS = isGuest ? 5 : 15;
+  const isLimitReached = produtos.length >= MAX_PRODUTOS;
+
   const handleAdd = () => {
     if (!novoNome || !novoCmv) return;
+    if (isLimitReached) return;
+    
     const item = { 
       id: Date.now().toString(), 
       nome: novoNome, 
@@ -75,7 +81,38 @@ export default function CustosVariaveis() {
 
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden mt-6">
          <div className="p-6 border-b border-border bg-muted/30">
-          <h3 className="text-lg font-medium text-foreground mb-4">Adicionar Produto/Serviço</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-foreground">Adicionar Produto/Serviço</h3>
+            <div className="text-sm">
+              <span className={isLimitReached ? 'text-red-500 font-bold' : 'text-muted-foreground'}>
+                {produtos.length} / {MAX_PRODUTOS} cadastrados
+              </span>
+            </div>
+          </div>
+          
+          {isLimitReached && isGuest && (
+            <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-md text-sm flex items-start gap-3">
+              <Lock className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
+              <div>
+                <p className="font-semibold mb-1">Limite atingido para visitantes</p>
+                <p className="mb-2">Visitantes podem cadastrar até 5 produtos. Para cadastrar até 15 produtos e salvar seus dados permanentemente, crie uma conta gratuita.</p>
+                <Link to="/auth" className="inline-block bg-amber-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-700 transition-colors">
+                  Fazer Cadastro / Login
+                </Link>
+              </div>
+            </div>
+          )}
+          
+          {isLimitReached && !isGuest && (
+             <div className="mb-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md text-sm flex items-start gap-3">
+              <Lock className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
+              <div>
+                <p className="font-semibold mb-1">Limite máximo atingido</p>
+                <p>Você atingiu o limite de {MAX_PRODUTOS} produtos. Remova alguns produtos para adicionar novos.</p>
+              </div>
+            </div>
+          )}
+          
           <div className="flex flex-col md:flex-row gap-4">
              <div className="flex-1">
                <label className="block text-xs font-medium text-muted-foreground mb-1">Nome</label>
@@ -84,7 +121,8 @@ export default function CustosVariaveis() {
                  placeholder="Ex: Camiseta ou Consultoria" 
                  value={novoNome} 
                  onChange={e => setNovoNome(e.target.value)} 
-                 className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm" 
+                 disabled={isLimitReached}
+                 className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm disabled:opacity-50" 
                />
              </div>
              <div className="w-full md:w-48">
@@ -94,7 +132,8 @@ export default function CustosVariaveis() {
                  placeholder="Ex: 35.00" 
                  value={novoCmv} 
                  onChange={e => setNovoCmv(e.target.value)} 
-                 className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm" 
+                 disabled={isLimitReached}
+                 className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm disabled:opacity-50" 
                />
              </div>
              <div className="w-full md:w-48">
@@ -104,11 +143,16 @@ export default function CustosVariaveis() {
                  placeholder="Ex: 100" 
                  value={vendasProjetadas} 
                  onChange={e => setVendasProjetadas(e.target.value)} 
-                 className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm" 
+                 disabled={isLimitReached}
+                 className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm disabled:opacity-50" 
                />
              </div>
              <div className="flex items-end">
-               <button onClick={handleAdd} className="w-full flex items-center justify-center bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium hover:bg-primary/90 transition-colors h-[38px]">
+               <button 
+                 onClick={handleAdd} 
+                 disabled={isLimitReached}
+                 className="w-full flex items-center justify-center bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium hover:bg-primary/90 transition-colors h-[38px] disabled:opacity-50"
+               >
                  <Plus className="w-4 h-4 mr-1" /> Adicionar
                </button>
              </div>

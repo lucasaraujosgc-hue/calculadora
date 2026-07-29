@@ -72,17 +72,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   const [produtos, setProdutos] = useState<ProdutoItem[]>(() => {
+    const saved = localStorage.getItem('vc_produtos');
+    if (saved) return JSON.parse(saved);
+    const session = sessionStorage.getItem('vc_produtos');
+    if (session) return JSON.parse(session);
     return [
       { id: '1', nome: 'Cimento CP II 50 kg', cmv: 32.20, vendasProjetadas: 95, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
       { id: '2', nome: 'Tijolo Cerâmico 9x19x19', cmv: 0.87, vendasProjetadas: 100, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
       { id: '3', nome: 'Argamassa AC-II 20 kg', cmv: 19.30, vendasProjetadas: 60, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
       { id: '4', nome: 'Tinta Acrílica Branca 18 L', cmv: 172.50, vendasProjetadas: 28, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
       { id: '5', nome: 'Tubo PVC Soldável 25 mm (3 m)', cmv: 18.50, vendasProjetadas: 45, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '6', nome: 'Fio Flexível 2,5 mm² (100 m)', cmv: 254.00, vendasProjetadas: 22, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '7', nome: 'Torneira Plástica para Jardim', cmv: 8.30, vendasProjetadas: 75, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '8', nome: 'Telha Fibrocimento 2,44 m', cmv: 60.50, vendasProjetadas: 35, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '9', nome: 'Fechadura Externa Inox', cmv: 49.50, vendasProjetadas: 40, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '10', nome: 'Lâmpada LED 12W', cmv: 8.50, vendasProjetadas: 90, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
     ];
   });
 
@@ -90,16 +89,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const storage = user && localStorage.getItem('vc_user') ? localStorage : sessionStorage;
     storage.setItem('vc_custos', JSON.stringify(custosFixos));
-  }, [custosFixos, user]);
+    storage.setItem('vc_produtos', JSON.stringify(produtos));
+  }, [custosFixos, produtos, user]);
 
   const login = (u: User, remember: boolean) => {
     setUser(u);
     if (remember) {
       localStorage.setItem('vc_user', JSON.stringify(u));
       localStorage.setItem('vc_custos', JSON.stringify(custosFixos));
+      localStorage.setItem('vc_produtos', JSON.stringify(produtos));
     } else {
       sessionStorage.setItem('vc_user', JSON.stringify(u));
       sessionStorage.setItem('vc_custos', JSON.stringify(custosFixos));
+      sessionStorage.setItem('vc_produtos', JSON.stringify(produtos));
     }
     setIsGuest(false);
   };

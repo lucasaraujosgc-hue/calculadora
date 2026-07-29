@@ -185,8 +185,12 @@ app.post("/api/leads", (req, res) => {
 // Registration route
 app.post("/api/register", async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
+    const { name, email, phone } = req.body;
     
+    if (!name || !email || !phone) {
+      return res.status(400).json({ error: "Preencha todos os campos." });
+    }
+
     const users = getUsers();
     
     // Verify if user already exists
@@ -194,15 +198,13 @@ app.post("/api/register", async (req, res) => {
       return res.status(400).json({ error: "E-mail já cadastrado" });
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
     const activationToken = crypto.randomBytes(20).toString('hex');
     
     const newUser = { 
       name, 
       email, 
-      phone, 
-      passwordHash,
+      phone,
+      passwordHash: null,
       role: 'user',
       isActivated: false,
       activationToken,
@@ -225,8 +227,8 @@ app.post("/api/register", async (req, res) => {
         await transporter.sendMail({
           from: `"${fromName}" <${fromEmail}>`,
           to: email,
-          subject: "Ative sua conta - Vírgula Contábil",
-          text: `Olá ${name},\n\nObrigado por se cadastrar!\n\nPor favor, ative sua conta clicando no link: ${verificationLink}\n\nAtenciosamente,\nEquipe Vírgula Contábil`,
+          subject: "Ative sua conta e crie sua senha - Vírgula Contábil",
+          text: `Olá ${name},\n\nObrigado por se cadastrar!\n\nPor favor, ative sua conta e defina sua senha clicando no link: ${verificationLink}\n\nAtenciosamente,\nEquipe Vírgula Contábil`,
           html: `
             <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden;">
               <div style="background-color: #10b981; padding: 20px; text-align: center;">
@@ -235,9 +237,9 @@ app.post("/api/register", async (req, res) => {
               <div style="padding: 30px;">
                 <p>Olá <strong>${name}</strong>,</p>
                 <p>Obrigado por se cadastrar na nossa plataforma.</p>
-                <p>Para começar a utilizar todas as ferramentas, por favor ative sua conta clicando no botão abaixo:</p>
+                <p>Para começar a utilizar todas as ferramentas, por favor ative sua conta e defina sua senha clicando no botão abaixo:</p>
                 <div style="text-align: center; margin: 30px 0;">
-                  <a href="${verificationLink}" style="background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">Ativar Minha Conta</a>
+                  <a href="${verificationLink}" style="background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">Ativar e Criar Senha</a>
                 </div>
                 <p>Ou acesse pelo link: <a href="${verificationLink}">${verificationLink}</a></p>
                 <br/>
@@ -253,24 +255,46 @@ app.post("/api/register", async (req, res) => {
       }
     }
 
-    res.json({ success: true, message: 'Usuário cadastrado com sucesso. Verifique seu e-mail para ativar a conta.' });
+    res.json({ success: true, message: 'Usuário cadastrado com sucesso. Verifique seu e-mail para ativar a conta e criar sua senha.' });
   } catch (error) {
     console.error("Error registering user:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.post("/api/verify", (req, res) => {
-  const { token } = req.body;
+app.get("/api/verify/:token", (req, res) => {
+  const users = getUsers();
+  const user = users.find((u: any) => u.activationToken === req.params.token);
+  if (user) {
+    res.json({ success: true, user: { name: user.name, email: user.email } });
+  } else {
+    res.status(400).json({ error: "Token inválido ou expirado" });
+  }
+});
+
+app.post("/api/verify", async (req, res) => {
+  const { token, password } = req.body;
   const users = getUsers();
   
   const userIndex = users.findIndex((u: any) => u.activationToken === token);
   
   if (userIndex !== -1) {
-    users[userIndex].isActivated = true;
-    users[userIndex].activationToken = null;
-    saveUsers(users);
-    res.json({ success: true, message: 'Conta ativada com sucesso!' });
+    if (!password) {
+      return res.status(400).json({ error: "Senha é obrigatória." });
+    }
+    
+    try {
+      const salt = await bcrypt.genSalt(10);
+      const passwordHash = await bcrypt.hash(password, salt);
+      
+      users[userIndex].passwordHash = passwordHash;
+      users[userIndex].isActivated = true;
+      users[userIndex].activationToken = null;
+      saveUsers(users);
+      res.json({ success: true, message: 'Conta ativada com sucesso!' });
+    } catch (err) {
+      res.status(500).json({ error: "Erro ao salvar senha." });
+    }
   } else {
     res.status(400).json({ error: "Token inválido ou expirado" });
   }

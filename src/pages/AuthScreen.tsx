@@ -20,20 +20,20 @@ export default function AuthScreen() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isRegistering) {
-       if (!name || !email || !phone || !password) return alert('Preencha todos os campos');
+       if (!name || !email || !phone) return alert('Preencha todos os campos');
        
        setIsLoading(true);
        try {
          const res = await fetch('/api/register', {
            method: 'POST',
            headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ name, email, phone, password }),
+           body: JSON.stringify({ name, email, phone }),
          });
          
          const data = await res.json();
          if (!res.ok) throw new Error(data.error || 'Erro ao registrar');
          
-         alert(data.message || 'Verifique seu e-mail para ativar a conta.');
+         alert(data.message || 'Verifique seu e-mail para ativar a conta e criar sua senha.');
          setIsRegistering(false); // go back to login view
        } catch (err: any) {
          alert(err.message || 'Houve um erro ao realizar o cadastro.');
@@ -120,29 +120,33 @@ export default function AuthScreen() {
             />
           </div>
           
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Senha</label>
-            <input 
-              type="password" 
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-              placeholder="••••••••"
-            />
-          </div>
+          {!isRegistering && (
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Senha</label>
+              <input 
+                type="password" 
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="••••••••"
+              />
+            </div>
+          )}
 
-          <div className="flex items-center gap-2">
-            <input 
-              type="checkbox" 
-              id="rememberMe" 
-              checked={rememberMe}
-              onChange={e => setRememberMe(e.target.checked)}
-              className="w-4 h-4 text-primary border-border rounded focus:ring-primary/50"
-            />
-            <label htmlFor="rememberMe" className="text-sm font-medium text-foreground">
-              Manter-se conectado
-            </label>
-          </div>
+          {!isRegistering && (
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox" 
+                id="rememberMe" 
+                checked={rememberMe}
+                onChange={e => setRememberMe(e.target.checked)}
+                className="w-4 h-4 text-primary border-border rounded focus:ring-primary/50"
+              />
+              <label htmlFor="rememberMe" className="text-sm font-medium text-foreground">
+                Manter-se conectado
+              </label>
+            </div>
+          )}
           
           <button type="submit" disabled={isLoading} className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 transition-colors disabled:opacity-50">
             {isLoading ? 'Aguarde...' : (isRegistering ? 'Cadastrar' : 'Entrar')}
