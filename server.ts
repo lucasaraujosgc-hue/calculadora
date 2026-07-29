@@ -319,6 +319,10 @@ app.post("/api/login", async (req, res) => {
       return res.status(401).json({ error: "Credenciais inválidas" });
     }
     
+    if (!user.passwordHash) {
+      return res.status(401).json({ error: "Sua conta ainda não foi ativada ou não tem senha. Verifique seu e-mail." });
+    }
+    
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     
     if (!isValidPassword) {
@@ -354,6 +358,46 @@ app.delete("/api/admin/users/:email", (req, res) => {
   users = users.filter((u: any) => u.email !== emailToDelete);
   saveUsers(users);
   res.json({ success: true });
+});
+
+app.post("/api/change-password", async (req, res) => {
+  try {
+    const { email, currentPassword, newPassword } = req.body;
+    
+    if (!email || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Dados incompletos" });
+    }
+
+    const users = getUsers();
+    const userIndex = users.findIndex((u: any) => u.email === email);
+    
+    if (userIndex === -1) {
+      return res.status(404).json({ error: "Usuário não encontrado" });
+    }
+    
+    const user = users[userIndex];
+    
+    if (!user.passwordHash) {
+      return res.status(400).json({ error: "Usuário sem senha cadastrada" });
+    }
+    
+    const isValidPassword = await bcrypt.compare(currentPassword, user.passwordHash);
+    
+    if (!isValidPassword) {
+      return res.status(401).json({ error: "Senha atual incorreta" });
+    }
+    
+    const salt = await bcrypt.genSalt(10);
+    const newPasswordHash = await bcrypt.hash(newPassword, salt);
+    
+    users[userIndex].passwordHash = newPasswordHash;
+    saveUsers(users);
+    
+    res.json({ success: true, message: "Senha alterada com sucesso" });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Vite middleware for development

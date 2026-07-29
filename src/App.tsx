@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import AuthScreen from './pages/AuthScreen';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
-import Relatorios from './pages/Relatorios';
+import Settings from './pages/Settings';
 import FormacaoPreco from './pages/FormacaoPreco';
 import MixPreco from './pages/MixPreco';
 import MixPrecoLote from './pages/MixPrecoLote';
@@ -31,7 +31,7 @@ export default function App() {
         <Route path="/auth" element={<AuthScreen />} />
         <Route path="/verify" element={<VerifyEmail />} />
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-        <Route path="/relatorios" element={<ProtectedRoute><Relatorios /></ProtectedRoute>} />
+        <Route path="/configuracoes" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/formacao-preco" element={<ProtectedRoute><FormacaoPreco /></ProtectedRoute>} />
         <Route path="/mix-preco" element={<ProtectedRoute><MixPreco /></ProtectedRoute>} />
         <Route path="/mix-preco-lote" element={<ProtectedRoute><MixPrecoLote /></ProtectedRoute>} />
