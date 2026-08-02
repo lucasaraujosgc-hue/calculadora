@@ -6,6 +6,8 @@ export type User = {
   phone: string;
   role?: string;
   isActivated?: boolean;
+  plan?: string | null;
+  productLimit?: number;
 };
 
 export type CustoFixoItem = {
@@ -77,11 +79,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const session = sessionStorage.getItem('vc_produtos');
     if (session) return JSON.parse(session);
     return [
-      { id: '1', nome: 'Cimento CP II 50 kg', cmv: 32.20, vendasProjetadas: 95, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '2', nome: 'Tijolo Cerâmico 9x19x19', cmv: 0.87, vendasProjetadas: 100, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '3', nome: 'Argamassa AC-II 20 kg', cmv: 19.30, vendasProjetadas: 60, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '4', nome: 'Tinta Acrílica Branca 18 L', cmv: 172.50, vendasProjetadas: 28, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
-      { id: '5', nome: 'Tubo PVC Soldável 25 mm (3 m)', cmv: 18.50, vendasProjetadas: 45, imposto: 8, taxaCartao: 2, comissao: 0, margem: 15 },
+      { id: '1', nome: 'Cimento CP II 50 kg', cmv: 32.20, vendasProjetadas: 300, imposto: 8, taxaCartao: 5, comissao: 2, margem: 25, percentualRateio: 20 },
+      { id: '2', nome: 'Tijolo Cerâmico 9x19x19', cmv: 0.87, vendasProjetadas: 2000, imposto: 8, taxaCartao: 5, comissao: 2, margem: 25, percentualRateio: 20 },
+      { id: '3', nome: 'Argamassa AC-II 20 kg', cmv: 19.30, vendasProjetadas: 200, imposto: 8, taxaCartao: 5, comissao: 2, margem: 25, percentualRateio: 20 },
+      { id: '4', nome: 'Tinta Acrílica Branca 18 L', cmv: 172.50, vendasProjetadas: 80, imposto: 8, taxaCartao: 5, comissao: 2, margem: 25, percentualRateio: 20 },
+      { id: '5', nome: 'Tubo PVC Soldável 25 mm (3 m)', cmv: 18.50, vendasProjetadas: 150, imposto: 8, taxaCartao: 5, comissao: 2, margem: 25, percentualRateio: 20 },
     ];
   });
 
@@ -94,14 +96,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const login = (u: User, remember: boolean) => {
     setUser(u);
+    
+    // Zera os dados locais para que o usuário inicie o uso zerado, conforme solicitado.
+    setCustosFixos([]);
+    setProdutos([]);
+    
     if (remember) {
       localStorage.setItem('vc_user', JSON.stringify(u));
-      localStorage.setItem('vc_custos', JSON.stringify(custosFixos));
-      localStorage.setItem('vc_produtos', JSON.stringify(produtos));
+      localStorage.setItem('vc_custos', JSON.stringify([]));
+      localStorage.setItem('vc_produtos', JSON.stringify([]));
     } else {
       sessionStorage.setItem('vc_user', JSON.stringify(u));
-      sessionStorage.setItem('vc_custos', JSON.stringify(custosFixos));
-      sessionStorage.setItem('vc_produtos', JSON.stringify(produtos));
+      sessionStorage.setItem('vc_custos', JSON.stringify([]));
+      sessionStorage.setItem('vc_produtos', JSON.stringify([]));
     }
     setIsGuest(false);
   };
@@ -110,6 +117,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem('vc_user');
     sessionStorage.removeItem('vc_user');
+    
+    // Zera os dados locais para que ao voltar a ser visitante, 
+    // recarregue os dados de demonstração (se houver refresh) ou mantenha zerado se preferir, 
+    // mas remover permite que o fluxo de visitante reinicie limpo.
+    localStorage.removeItem('vc_custos');
+    localStorage.removeItem('vc_produtos');
+    sessionStorage.removeItem('vc_custos');
+    sessionStorage.removeItem('vc_produtos');
+    
+    setCustosFixos([]);
+    setProdutos([]);
     setIsGuest(true);
   };
 

@@ -1,6 +1,6 @@
 import React from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Percent } from 'lucide-react';
+import { Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Percent, Target, Box, FileText, Info } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
 export default function Dashboard() {
@@ -11,6 +11,9 @@ export default function Dashboard() {
   let receitaEstimada = 0;
   let margemTotal = 0;
   let produtosSemMargem = 0;
+  let custosVariaveisTotais = 0;
+  let impostoValorTotal = 0;
+  let taxasComissoesValorTotal = 0;
 
   produtos.forEach(p => {
     const vendas = p.vendasProjetadas || 0;
@@ -18,15 +21,39 @@ export default function Dashboard() {
     const taxa = p.taxaCartao || 0;
     const com = p.comissao || 0;
     const margem = p.margem || 0;
-    const totalPerc = imposto + taxa + com + margem;
-    const divisor = (100 - totalPerc) / 100;
+    const rateio = p.percentualRateio || 0;
     
-    // Calcula precoIdeal, mas também é possivel usar o do produto se existir.
-    const preco = divisor > 0 ? (p.cmv / divisor) : (p.precoIdeal || 0);
+    const valorRateadoCF = (rateio / 100) * custoFixoTotal;
+    const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
+    
+    const despesasVariaveisPerc = imposto + taxa + com;
+    
+    let preco = 0;
+    let margemReal = margem;
+    
+    if (p.modoPrecificacao === 'preco') {
+      preco = p.precoFixo || 0;
+      const custoTot = p.cmv + custoFixoUnitario;
+      const descontosVariaveis = preco * (despesasVariaveisPerc / 100);
+      const lucroReais = preco - custoTot - descontosVariaveis;
+      margemReal = preco > 0 ? (lucroReais / preco) * 100 : 0;
+    } else {
+      const totalPerc = despesasVariaveisPerc + margem;
+      const divisor = (100 - totalPerc) / 100;
+      preco = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
+    }
     
     receitaEstimada += preco * vendas;
+    custosVariaveisTotais += p.cmv * vendas;
     
-    const despesas = preco * ((imposto + taxa + com) / 100);
+    const valorImposto = preco * (imposto / 100);
+    const valorTaxasCom = preco * ((taxa + com) / 100);
+    const valorMargem = preco * (margemReal / 100);
+    
+    impostoValorTotal += valorImposto * vendas;
+    taxasComissoesValorTotal += valorTaxasCom * vendas;
+    
+    const despesas = valorImposto + valorTaxasCom;
     const margemContribuicao = preco - p.cmv - despesas;
     
     margemTotal += margemContribuicao * vendas;
@@ -38,16 +65,17 @@ export default function Dashboard() {
 
   const lucroEstimado = margemTotal - custoFixoTotal;
   const mediaMargem = receitaEstimada > 0 ? (margemTotal / receitaEstimada) * 100 : 0;
-  
-  // Fake chart data based on estimated monthly revenue
-  const data = [
-    { name: 'Mês 1', revenue: receitaEstimada * 0.8, profit: (lucroEstimado * 0.8) },
-    { name: 'Mês 2', revenue: receitaEstimada * 0.9, profit: (lucroEstimado * 0.9) },
-    { name: 'Mês 3', revenue: receitaEstimada * 1.0, profit: lucroEstimado },
-    { name: 'Mês 4', revenue: receitaEstimada * 1.1, profit: (lucroEstimado * 1.1) },
-    { name: 'Mês 5', revenue: receitaEstimada * 1.2, profit: (lucroEstimado * 1.2) },
-    { name: 'Mês 6', revenue: receitaEstimada * 1.3, profit: (lucroEstimado * 1.3) },
-  ];
+  const impostoPorcentagem = receitaEstimada > 0 ? (impostoValorTotal / receitaEstimada) * 100 : 0;
+  const pontoEquilibrio = mediaMargem > 0 ? (custoFixoTotal / (mediaMargem / 100)) : 0;
+
+  const pieData = [
+    { name: 'Custo Fixo', value: custoFixoTotal },
+    { name: 'Custo Variável (CMV)', value: custosVariaveisTotais },
+    { name: 'Impostos', value: impostoValorTotal },
+    { name: 'Taxas/Comissões', value: taxasComissoesValorTotal },
+  ].filter(d => d.value > 0);
+
+  const COLORS = ['#f43f5e', '#3b82f6', '#eab308', '#8b5cf6'];
 
   return (
     <div className="space-y-6 pb-12">
@@ -61,9 +89,14 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { title: 'Receita Estimada Mensal', value: `R$ ${receitaEstimada.toFixed(2)}`, isPositive: receitaEstimada > 0, icon: DollarSign },
-          { title: 'Custo Fixo Mensal', value: `R$ ${custoFixoTotal.toFixed(2)}`, isPositive: false, icon: TrendingUp },
+          { title: 'Ponto de Equilíbrio', value: `R$ ${pontoEquilibrio.toFixed(2)}`, isPositive: receitaEstimada >= pontoEquilibrio, icon: Target },
           { title: 'Lucro Estimado', value: `R$ ${lucroEstimado.toFixed(2)}`, isPositive: lucroEstimado > 0, icon: ShoppingBag },
           { title: 'Margem Global (Média)', value: `${mediaMargem.toFixed(1)}%`, isPositive: mediaMargem > 20, icon: Percent },
+          
+          { title: 'Custo Fixo Mensal', value: `R$ ${custoFixoTotal.toFixed(2)}`, isPositive: false, icon: TrendingUp },
+          { title: 'Custo Variável Total', value: `R$ ${custosVariaveisTotais.toFixed(2)}`, isPositive: false, icon: Box },
+          { title: 'Impostos Gerais', value: `R$ ${impostoValorTotal.toFixed(2)} (${impostoPorcentagem.toFixed(1)}%)`, isPositive: false, icon: FileText },
+          { title: 'Taxas e Comissões', value: `R$ ${taxasComissoesValorTotal.toFixed(2)}`, isPositive: false, icon: Percent },
         ].map((stat, i) => (
           <div key={i} className="bg-card border border-border p-5 rounded-xl shadow-sm">
             <div className="flex items-center justify-between mb-4">
@@ -74,7 +107,7 @@ export default function Dashboard() {
                 {stat.isPositive ? 'Positivo' : 'Atenção'}
               </div>
             </div>
-            <h3 className="text-2xl font-bold text-foreground">{stat.value}</h3>
+            <h3 className="text-xl font-bold text-foreground">{stat.value}</h3>
             <p className="text-sm font-medium text-muted-foreground mt-1">{stat.title}</p>
           </div>
         ))}
@@ -82,36 +115,90 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-card border border-border p-6 rounded-xl shadow-sm">
-          <h3 className="text-lg font-medium text-foreground mb-6">Projeção de Faturamento e Lucro (Próximos Meses)</h3>
+          <div className="flex items-center gap-2 mb-6">
+            <Info className="w-5 h-5 text-muted-foreground" />
+            <h3 className="text-lg font-medium text-foreground">Como analisar seus indicadores</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 flex flex-col">
+               <div className="flex items-center gap-2 mb-2">
+                 <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                    <Target className="w-4 h-4" />
+                 </div>
+                 <h4 className="font-semibold text-blue-800 text-sm">Ponto de Equilíbrio</h4>
+               </div>
+               <p className="text-sm text-blue-700 leading-relaxed mt-1">
+                 É o valor em vendas necessário para pagar todos os seus custos (fixos e variáveis) sem gerar prejuízo. Se a receita for maior que ele, a operação tem lucro.
+               </p>
+            </div>
+            
+            <div className="p-4 rounded-xl bg-purple-50 border border-purple-100 flex flex-col">
+               <div className="flex items-center gap-2 mb-2">
+                 <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
+                    <Percent className="w-4 h-4" />
+                 </div>
+                 <h4 className="font-semibold text-purple-800 text-sm">Margem Global</h4>
+               </div>
+               <p className="text-sm text-purple-700 leading-relaxed mt-1">
+                 Mostra o quanto sobra em percentual após abater o custo do produto, impostos e taxas. Indica a saúde de contribuição do seu mix de produtos.
+               </p>
+            </div>
+            
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 flex flex-col">
+               <div className="flex items-center gap-2 mb-2">
+                 <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                    <Box className="w-4 h-4" />
+                 </div>
+                 <h4 className="font-semibold text-rose-800 text-sm">Custo Variável e CMV</h4>
+               </div>
+               <p className="text-sm text-rose-700 leading-relaxed mt-1">
+                 Custos que crescem junto com as vendas. O CMV é o custo base do produto. Analisar o peso dessa fatia na receita é vital para a precificação.
+               </p>
+            </div>
+            
+            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-100 flex flex-col">
+               <div className="flex items-center gap-2 mb-2">
+                 <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                    <ShoppingBag className="w-4 h-4" />
+                 </div>
+                 <h4 className="font-semibold text-emerald-800 text-sm">Lucro Estimado</h4>
+               </div>
+               <p className="text-sm text-emerald-700 leading-relaxed mt-1">
+                 O resultado final projetado para o fim do mês, após pagar todos os custos e despesas. É o oxigênio financeiro do seu negócio.
+               </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
+          <h3 className="text-lg font-medium text-foreground mb-6">Estrutura de Custos</h3>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dx={-10} tickFormatter={(value) => `R$${(value/1000).toFixed(0)}k`} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  itemStyle={{ fontSize: '14px', fontWeight: 500 }}
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {pieData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <RechartsTooltip 
                   formatter={(value: number) => `R$ ${value.toFixed(2)}`}
+                  contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 />
-                <Area type="monotone" dataKey="revenue" name="Faturamento" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
-                <Area type="monotone" dataKey="profit" name="Lucro" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorProfit)" />
-              </AreaChart>
+                <Legend verticalAlign="bottom" height={36} />
+              </PieChart>
             </ResponsiveContainer>
           </div>
         </div>
         
-        <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
+        <div className="lg:col-span-3 bg-card border border-border p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-medium text-foreground mb-6">Alertas</h3>
           <div className="space-y-4">
              {lucroEstimado < 0 && (

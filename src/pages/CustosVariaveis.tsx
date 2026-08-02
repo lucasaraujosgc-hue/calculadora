@@ -4,13 +4,14 @@ import { useAppContext } from '../context/AppContext';
 import { Link } from 'react-router-dom';
 
 export default function CustosVariaveis() {
-  const { produtos, setProdutos, isGuest } = useAppContext();
+  const { user, produtos, setProdutos, isGuest } = useAppContext();
   const [novoNome, setNovoNome] = useState('');
   const [novoCmv, setNovoCmv] = useState('');
   const [vendasProjetadas, setVendasProjetadas] = useState('');
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
-  const MAX_PRODUTOS = isGuest ? 5 : 15;
+  const MAX_PRODUTOS = user ? (user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7)) : 5;
   const isLimitReached = produtos.length >= MAX_PRODUTOS;
 
   const handleAdd = () => {
@@ -32,6 +33,63 @@ export default function CustosVariaveis() {
     setNovoNome('');
     setNovoCmv('');
     setVendasProjetadas('');
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/products/import', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        if (data.upgradeRequired) {
+          alert('Faça upgrade para um plano superior para importar planilhas.');
+        } else {
+          alert(data.error || 'Erro ao importar planilha');
+        }
+        setIsImporting(false);
+        if (e.target) e.target.value = '';
+        return;
+      }
+
+      // Merge imported products into local state
+      const newItems = data.imported.map((p: any) => ({
+        id: crypto.randomUUID(),
+        nome: p.name,
+        cmv: p.costPrice,
+        vendasProjetadas: 0,
+        imposto: 0,
+        taxaCartao: 0,
+        comissao: 0,
+        margem: 0,
+        percentualRateio: 0,
+        precoIdeal: p.salePrice || 0
+      }));
+
+      // Limit to MAX_PRODUTOS
+      const availableSlots = MAX_PRODUTOS - produtos.length;
+      if (availableSlots <= 0) {
+        alert(`Limite de ${MAX_PRODUTOS} produtos atingido. Faça upgrade para cadastrar mais.`);
+      } else {
+        const toAdd = newItems.slice(0, availableSlots);
+        setProdutos([...produtos, ...toAdd]);
+        alert(`Planilha importada com sucesso! ${toAdd.length} produtos adicionados.`);
+      }
+    } catch (err) {
+      alert('Erro de conexão ao importar planilha.');
+    } finally {
+      setIsImporting(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleRemove = (id: string) => {
@@ -95,7 +153,7 @@ export default function CustosVariaveis() {
               <Lock className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
               <div>
                 <p className="font-semibold mb-1">Limite atingido para visitantes</p>
-                <p className="mb-2">Visitantes podem cadastrar até 5 produtos. Para cadastrar até 15 produtos e salvar seus dados permanentemente, crie uma conta gratuita.</p>
+                <p className="mb-2">Visitantes podem cadastrar até 5 produtos. Para cadastrar até 7 produtos e salvar seus dados permanentemente, crie uma conta gratuita.</p>
                 <Link to="/auth" className="inline-block bg-amber-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-700 transition-colors">
                   Fazer Cadastro / Login
                 </Link>
@@ -147,14 +205,28 @@ export default function CustosVariaveis() {
                  className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm disabled:opacity-50" 
                />
              </div>
-             <div className="flex items-end">
+             <div className="flex items-end gap-2">
                <button 
                  onClick={handleAdd} 
                  disabled={isLimitReached}
-                 className="w-full flex items-center justify-center bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium hover:bg-primary/90 transition-colors h-[38px] disabled:opacity-50"
+                 className="flex-1 flex items-center justify-center bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium hover:bg-primary/90 transition-colors h-[38px] disabled:opacity-50"
                >
                  <Plus className="w-4 h-4 mr-1" /> Adicionar
                </button>
+               
+               <label 
+                 className={`flex-1 flex items-center justify-center border border-primary text-primary px-4 py-2 rounded-md font-medium hover:bg-primary/5 transition-colors h-[38px] cursor-pointer ${isImporting || isLimitReached ? 'opacity-50 cursor-not-allowed' : ''}`}
+                 title="Importar de Planilha (Excel)"
+               >
+                 {isImporting ? 'Importando...' : 'Importar Excel'}
+                 <input 
+                   type="file" 
+                   accept=".xlsx,.xls" 
+                   className="hidden" 
+                   onChange={handleImportExcel}
+                   disabled={isImporting || isLimitReached}
+                 />
+               </label>
              </div>
           </div>
         </div>

@@ -96,6 +96,97 @@ function requireAuth(req: any, res: any, next: any) {
   }
 }
 
+function requireUser(req: any, res: any, next: any) {
+  const token = req.cookies.user_token;
+  if (!token) return res.status(401).json({ error: "Não autenticado" });
+  try {
+    const payload: any = jwt.verify(token, process.env.JWT_SECRET || "default-secret");
+    const users = getUsers();
+    const user = users.find((u: any) => u.email === payload.email);
+    if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
+    req.currentUser = user;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Sessão inválida" });
+  }
+}
+
+export const PLANS = {
+  basico: {
+    id: "basico",
+    name: "Básico",
+    priceCents: 949,
+    productLimit: 20,
+    excelImport: false,
+    consultingCall: false
+  },
+  intermediario: {
+    id: "intermediario",
+    name: "Intermediário",
+    priceCents: 2749,
+    productLimit: 80,
+    excelImport: true,
+    consultingCall: false
+  },
+  ilimitado: {
+    id: "ilimitado",
+    name: "Ilimitado",
+    priceCents: 5990,
+    productLimit: Number.MAX_SAFE_INTEGER,
+    excelImport: true,
+    consultingCall: true
+  }
+} as const;
+
+export type PlanId = keyof typeof PLANS;
+
+const PAYMENTS_FILE = path.join(process.cwd(), "data", "payments.json");
+const PRODUCTS_FILE = path.join(process.cwd(), "data", "products.json");
+
+function getPayments() {
+  if (!fs.existsSync(PAYMENTS_FILE)) return [];
+  return JSON.parse(fs.readFileSync(PAYMENTS_FILE, "utf-8"));
+}
+function savePayments(payments: any) {
+  const dir = path.dirname(PAYMENTS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(PAYMENTS_FILE, JSON.stringify(payments, null, 2), "utf-8");
+}
+
+function getAllProducts() {
+  if (!fs.existsSync(PRODUCTS_FILE)) return [];
+  return JSON.parse(fs.readFileSync(PRODUCTS_FILE, "utf-8"));
+}
+function saveAllProducts(products: any) {
+  const dir = path.dirname(PRODUCTS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(products, null, 2), "utf-8");
+}
+function getUserRealProducts(email: string) {
+  return getAllProducts().filter((p: any) => p.ownerEmail === email && !p.isSample);
+}
+
+function seedSampleProducts(email: string) {
+  const products = getAllProducts();
+  const samples = [
+    { name: "Cimento CP II 50 kg (exemplo)", costPrice: 32.20, salePrice: 42.0 },
+    { name: "Tijolo Cerâmico 9x19x19 (exemplo)", costPrice: 0.87, salePrice: 1.50 },
+    { name: "Argamassa AC-II 20 kg (exemplo)", costPrice: 19.30, salePrice: 28.0 },
+    { name: "Tinta Acrílica Branca 18 L (exemplo)", costPrice: 172.50, salePrice: 240.0 },
+    { name: "Tubo PVC Soldável 25 mm (3 m) (exemplo)", costPrice: 18.50, salePrice: 26.0 },
+  ];
+  samples.forEach(s => {
+    products.push({
+      id: crypto.randomUUID(),
+      ownerEmail: email,
+      ...s,
+      isSample: true,
+      createdAt: new Date().toISOString()
+    });
+  });
+  saveAllProducts(products);
+}
+
 // API Routes
 
 // Admin routes (protected)
@@ -185,7 +276,8 @@ app.post("/api/leads", (req, res) => {
 // Registration route
 app.post("/api/register", async (req, res) => {
   try {
-    const { name, email, phone } = req.body;
+    const { name, phone } = req.body;
+    const email = req.body.email?.trim().toLowerCase();
     
     if (!name || !email || !phone) {
       return res.status(400).json({ error: "Preencha todos os campos." });
@@ -208,6 +300,9 @@ app.post("/api/register", async (req, res) => {
       role: 'user',
       isActivated: false,
       activationToken,
+      plan: null,
+      productLimit: 0,
+      proSince: null,
       timestamp: new Date().toISOString() 
     };
     
@@ -291,6 +386,7 @@ app.post("/api/verify", async (req, res) => {
       users[userIndex].isActivated = true;
       users[userIndex].activationToken = null;
       saveUsers(users);
+      // seedSampleProducts(users[userIndex].email); // Removido para iniciar zerado
       res.json({ success: true, message: 'Conta ativada com sucesso!' });
     } catch (err) {
       res.status(500).json({ error: "Erro ao salvar senha." });
@@ -302,10 +398,28 @@ app.post("/api/verify", async (req, res) => {
 
 app.post("/api/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = req.body.email?.trim().toLowerCase();
     
     // Check if it's admin
     if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
+      const adminToken = jwt.sign(
+        { email: process.env.ADMIN_EMAIL, role: 'admin' },
+        process.env.JWT_SECRET || "default-secret",
+        { expiresIn: "30d" }
+      );
+      res.cookie("admin_token", adminToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 30 * 24 * 60 * 60 * 1000
+      });
+      res.cookie("user_token", adminToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 30 * 24 * 60 * 60 * 1000
+      });
       return res.json({ 
         success: true, 
         user: { name: 'Admin', email: process.env.ADMIN_EMAIL, role: 'admin', isActivated: true }
@@ -335,6 +449,19 @@ app.post("/api/login", async (req, res) => {
     
     // Exclude passwordHash before sending
     const { passwordHash, activationToken, ...userWithoutSensitiveData } = user;
+    
+    const token = jwt.sign(
+      { email: user.email, role: user.role || 'user' },
+      process.env.JWT_SECRET || "default-secret",
+      { expiresIn: "30d" }
+    );
+
+    res.cookie("user_token", token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 30 * 24 * 60 * 60 * 1000
+    });
     
     res.json({ success: true, user: userWithoutSensitiveData });
   } catch (error) {
@@ -402,7 +529,7 @@ app.post("/api/change-password", async (req, res) => {
 
 app.post("/api/forgot-password", async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = req.body.email?.trim().toLowerCase();
     if (!email) return res.status(400).json({ error: "E-mail é obrigatório." });
 
     const users = getUsers();
@@ -487,6 +614,226 @@ app.post("/api/reset-password", async (req, res) => {
     console.error("Reset password error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
+  try {
+    const user = req.currentUser;
+    const planId = req.body.planId as PlanId;
+
+    const plan = PLANS[planId];
+    if (!plan) {
+      return res.status(400).json({ error: "Plano inválido." });
+    }
+    if (user.plan === planId) {
+      return res.status(400).json({ error: `Você já está no plano ${plan.name}.` });
+    }
+
+    const orderCode = `${plan.id.toUpperCase()}-${user.email}-${Date.now()}`;
+
+    const pagarmeRes = await fetch(`${process.env.PAGARME_API_URL}/paymentlinks`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Basic " + Buffer.from(`${process.env.PAGARME_SECRET_KEY}:`).toString("base64")
+      },
+      body: JSON.stringify({
+        type: "order",
+        name: `Plano ${plan.name} - ${user.email}`,
+        order_code: orderCode,
+        max_paid_sessions: 1,
+        payment_settings: {
+          accepted_payment_methods: ["credit_card", "pix"],
+          credit_card_settings: {
+            operation_type: "auth_and_capture",
+            installments_setup: { interest_type: "simple" },
+            installments: [{ number: 1, total: plan.priceCents }]
+          },
+          pix_settings: { expires_in: 3600 }
+        },
+        cart_settings: {
+          items: [{ amount: plan.priceCents, name: `Plano ${plan.name}`, default_quantity: 1 }]
+        }
+      })
+    });
+
+    const data: any = await pagarmeRes.json();
+    if (!pagarmeRes.ok) {
+      console.error("Erro Pagar.me:", data);
+      return res.status(502).json({ error: "Falha ao criar checkout na Pagar.me" });
+    }
+
+    const payments = getPayments();
+    payments.push({
+      orderCode,
+      email: user.email,
+      planId: plan.id,
+      paymentLinkId: data.id,
+      status: "pending",
+      createdAt: new Date().toISOString()
+    });
+    savePayments(payments);
+
+    res.json({ url: data.url });
+  } catch (error) {
+    console.error("Erro ao criar checkout:", error);
+    res.status(500).json({ error: "Erro interno ao criar checkout" });
+  }
+});
+
+app.post("/api/webhooks/pagarme", async (req, res) => {
+  try {
+    const event = req.body;
+
+    if (event.type === "order.paid") {
+      const orderCode = event.data?.code;
+      const payments = getPayments();
+      const payment = payments.find((p: any) => p.orderCode === orderCode);
+
+      if (payment) {
+        const plan = PLANS[payment.planId as PlanId];
+        const users = getUsers();
+        const idx = users.findIndex((u: any) => u.email === payment.email);
+
+        if (idx !== -1 && plan) {
+          users[idx].plan = plan.id;
+          users[idx].productLimit = plan.productLimit;
+          users[idx].proSince = new Date().toISOString();
+          saveUsers(users);
+
+          // Plano Ilimitado inclui call de consultoria — avisa o time
+          if (plan.consultingCall && process.env.SMTP_HOST) {
+            await transporter.sendMail({
+              from: `"Vírgula Contábil" <${process.env.SMTP_FROM_EMAIL}>`,
+              to: process.env.SALES_TEAM_EMAIL,
+              subject: `Nova assinatura Ilimitado - agendar consultoria: ${users[idx].email}`,
+              text: `O usuário ${users[idx].name} (${users[idx].email}) comprou o plano Ilimitado e tem direito a uma call de consultoria. Entre em contato para agendar.`
+            });
+          }
+        }
+
+        payment.status = "paid";
+        savePayments(payments);
+      }
+    }
+
+    res.status(200).json({ received: true });
+  } catch (error) {
+    console.error("Erro no webhook Pagar.me:", error);
+    res.status(200).json({ received: true, error: true });
+  }
+});
+
+function checkProductLimit(req: any, res: any, next: any) {
+  const user = req.currentUser;
+  const limit = user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7);
+  
+  const current = getUserRealProducts(user.email).length;
+  if (current >= limit) {
+    return res.status(403).json({
+      error: `Limite de ${limit} produtos atingido. Faça upgrade para cadastrar mais.`,
+      upgradeRequired: true
+    });
+  }
+  next();
+}
+
+function requireExcelImport(req: any, res: any, next: any) {
+  const plan = PLANS[req.currentUser.plan as PlanId];
+  if (!plan?.excelImport) {
+    return res.status(403).json({
+      error: "Import via Excel é exclusivo dos planos Intermediário e Ilimitado.",
+      upgradeRequired: true
+    });
+  }
+  next();
+}
+
+app.post("/api/products", requireUser, checkProductLimit, (req: any, res) => {
+  const products = getAllProducts();
+  const newProduct = { ...req.body, ownerEmail: req.currentUser.email, id: crypto.randomUUID() };
+  products.push(newProduct);
+  saveAllProducts(products);
+  res.json(newProduct);
+});
+
+app.get("/api/products", requireUser, (req: any, res) => {
+  res.json(getAllProducts().filter((p: any) => p.ownerEmail === req.currentUser.email));
+});
+
+import multer from "multer";
+import * as XLSX from "xlsx";
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+app.post(
+  "/api/products/import",
+  requireUser,
+  requireExcelImport,
+  upload.single("file"),
+  (req: any, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+      const products = getAllProducts();
+      const imported: any[] = [];
+      const errors: any[] = [];
+
+      rows.forEach((row, i) => {
+        const nome = row.nome || row.Nome || row.produto || row.Produto;
+        const precoCusto = row.preco_custo ?? row["Preço de Custo"] ?? row.custo;
+        const precoVenda = row.preco_venda ?? row["Preço de Venda"] ?? row.preco;
+
+        if (!nome || precoCusto == null) {
+          errors.push({ linha: i + 2, motivo: "Faltando nome ou preço de custo" });
+          return;
+        }
+
+        const product = {
+          id: crypto.randomUUID(),
+          ownerEmail: req.currentUser.email,
+          name: nome,
+          costPrice: Number(precoCusto),
+          salePrice: precoVenda != null ? Number(precoVenda) : null,
+          importedAt: new Date().toISOString()
+        };
+        products.push(product);
+        imported.push(product);
+      });
+
+      saveAllProducts(products);
+
+      res.json({ success: true, importedCount: imported.length, imported, errors });
+    } catch (error) {
+      console.error("Erro ao importar planilha:", error);
+      res.status(500).json({ error: "Erro ao processar a planilha." });
+    }
+  }
+);
+
+app.post("/api/admin/users/:email/plan", requireAuth, (req, res) => {
+  const users = getUsers();
+  const user = users.find((u: any) => u.email === req.params.email);
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  
+  const planId = req.body.planId as PlanId;
+  const plan = PLANS[planId];
+  if (!plan) {
+    return res.status(400).json({ error: "Plano inválido." });
+  }
+
+  user.plan = plan.id;
+  user.productLimit = plan.productLimit;
+  user.proSince = new Date().toISOString();
+  saveUsers(users);
+
+  res.json({ success: true, plan: plan.id });
 });
 
 // Vite middleware for development

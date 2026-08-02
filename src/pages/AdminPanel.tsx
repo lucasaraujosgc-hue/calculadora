@@ -80,6 +80,7 @@ export default function AdminPanel() {
                   <th className="px-4 py-3">E-mail</th>
                   <th className="px-4 py-3">Telefone</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Plano</th>
                   <th className="px-4 py-3">Data de Cadastro</th>
                   <th className="px-4 py-3 text-right">Ações</th>
                 </tr>
@@ -99,6 +100,39 @@ export default function AdminPanel() {
                         <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
                           <XCircle className="w-3 h-3" /> Pendente
                         </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {u.role !== 'admin' ? (
+                        <select 
+                          value={u.plan || ''} 
+                          onChange={async (e) => {
+                            const newPlan = e.target.value;
+                            try {
+                              const res = await fetch(`/api/admin/users/${encodeURIComponent(u.email)}/plan`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ planId: newPlan })
+                              });
+                              if (res.ok) {
+                                fetchUsers();
+                                alert('Plano atualizado com sucesso.');
+                              } else {
+                                alert('Erro ao atualizar plano.');
+                              }
+                            } catch (err) {
+                              alert('Erro de conexão.');
+                            }
+                          }}
+                          className="text-sm border border-border rounded-md px-2 py-1 bg-background"
+                        >
+                          <option value="">Sem Plano</option>
+                          <option value="basico">Básico</option>
+                          <option value="intermediario">Intermediário</option>
+                          <option value="ilimitado">Ilimitado</option>
+                        </select>
+                      ) : (
+                        <span className="text-xs text-muted-foreground uppercase font-bold">Admin</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
