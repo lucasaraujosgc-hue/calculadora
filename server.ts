@@ -651,7 +651,6 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
           accepted_payment_methods: ["credit_card", "pix"],
           credit_card_settings: {
             operation_type: "auth_and_capture",
-            installments_setup: { interest_type: "simple" },
             installments: [{ number: 1, total: plan.priceCents }]
           },
           pix_settings: { expires_in: 3600 }
