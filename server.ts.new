@@ -9,59 +9,6 @@ import nodemailer from "nodemailer";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
-
-import { db } from "./src/db/index.js";
-import { store } from "./src/db/schema.js";
-import { eq, sql } from "drizzle-orm";
-
-async function getStore(key: string): Promise<any[]> {
-  try {
-    const res = await db.select().from(store).where(eq(store.key, key));
-    return res.length > 0 ? (res[0].value as any[]) : [];
-  } catch(e) {
-    console.error("DB Get Error", e);
-    return [];
-  }
-}
-
-async function saveStore(key, value) {
-  try {
-    await db.insert(store).values({ key, value }).onConflictDoUpdate({
-      target: store.key,
-      set: { value }
-    });
-  } catch(e) {
-    console.error("DB Save Error", e);
-  }
-}
-
-async function getUsers() { return await getStore('users'); }
-async function saveUsers(users) { await saveStore('users', users); }
-async function getCourses() { return await getStore('courses'); }
-async function saveCourses(courses) { await saveStore('courses', courses); }
-async function getLeads() { return await getStore('leads'); }
-async function saveLeads(leads) { await saveStore('leads', leads); }
-async function getPayments() { return await getStore('payments'); }
-async function savePayments(payments) { await saveStore('payments', payments); }
-async function getAllProducts() { return await getStore('products'); }
-async function saveAllProducts(products) { await saveStore('products', products); }
-async function getUserRealProducts(email) { return (await getAllProducts()).filter((p) => p.ownerEmail === email && !p.isSample); }
-async function seedSampleProducts(email) {
-  const products = await getAllProducts();
-  const samples = [
-    { name: "Cimento CP II 50 kg (exemplo)", costPrice: 32.20, salePrice: 42.0 },
-    { name: "Tijolo Cerâmico 9x19x19 (exemplo)", costPrice: 0.87, salePrice: 1.50 },
-    { name: "Argamassa AC-II 20 kg (exemplo)", costPrice: 19.30, salePrice: 28.0 },
-    { name: "Tinta Acrílica Branca 18 L (exemplo)", costPrice: 172.50, salePrice: 240.0 },
-    { name: "Tubo PVC Soldável 25 mm (3 m) (exemplo)", costPrice: 18.50, salePrice: 26.0 },
-  ];
-  samples.forEach(s => {
-    products.push({ id: crypto.randomUUID(), ownerEmail: email, ...s, isSample: true, createdAt: new Date().toISOString() });
-  });
-  await saveAllProducts(products);
-}
-
-
 dotenv.config();
 
 const app = express();
@@ -79,6 +26,22 @@ const DATA_FILE = path.join(process.cwd(), "data", "courses.json");
 const LEADS_FILE = path.join(process.cwd(), "data", "leads.json");
 const USERS_FILE = path.join(process.cwd(), "data", "users.json");
 
+function getUsers() {
+  if (!fs.existsSync(USERS_FILE)) {
+    return [];
+  }
+  const data = fs.readFileSync(USERS_FILE, "utf-8");
+  return JSON.parse(data);
+}
+
+function saveUsers(users: any) {
+  const dir = path.dirname(USERS_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf-8");
+}
+
 // Nodemailer transport setup
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -92,8 +55,40 @@ const transporter = nodemailer.createTransport({
 
 
 // Simple helper to read/write JSON
+function getCourses() {
+  if (!fs.existsSync(DATA_FILE)) {
+    return [];
+  }
+  const data = fs.readFileSync(DATA_FILE, "utf-8");
+  return JSON.parse(data);
+}
+
+function saveCourses(courses: any) {
+  const dir = path.dirname(DATA_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(DATA_FILE, JSON.stringify(courses, null, 2), "utf-8");
+}
+
+function getLeads() {
+  if (!fs.existsSync(LEADS_FILE)) {
+    return [];
+  }
+  const data = fs.readFileSync(LEADS_FILE, "utf-8");
+  return JSON.parse(data);
+}
+
+function saveLeads(leads: any) {
+  const dir = path.dirname(LEADS_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2), "utf-8");
+}
+
 // Authentication middleware
-async function requireAuth(req: any, res: any, next: any) {
+function requireAuth(req: any, res: any, next: any) {
   const token = req.cookies.admin_token;
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -106,7 +101,7 @@ async function requireAuth(req: any, res: any, next: any) {
   }
 }
 
-async function requireUser(req: any, res: any, next: any) {
+function requireUser(req: any, res: any, next: any) {
   const token = req.cookies.user_token;
   if (!token) return res.status(401).json({ error: "Não autenticado" });
   try {
@@ -153,8 +148,49 @@ export type PlanId = keyof typeof PLANS;
 const PAYMENTS_FILE = path.join(process.cwd(), "data", "payments.json");
 const PRODUCTS_FILE = path.join(process.cwd(), "data", "products.json");
 
+function getPayments() {
+  if (!fs.existsSync(PAYMENTS_FILE)) return [];
+  return JSON.parse(fs.readFileSync(PAYMENTS_FILE, "utf-8"));
+}
+function savePayments(payments: any) {
+  const dir = path.dirname(PAYMENTS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(PAYMENTS_FILE, JSON.stringify(payments, null, 2), "utf-8");
+}
 
+function getAllProducts() {
+  if (!fs.existsSync(PRODUCTS_FILE)) return [];
+  return JSON.parse(fs.readFileSync(PRODUCTS_FILE, "utf-8"));
+}
+function saveAllProducts(products: any) {
+  const dir = path.dirname(PRODUCTS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(products, null, 2), "utf-8");
+}
+function getUserRealProducts(email: string) {
+  return await getAllProducts().filter((p: any) => p.ownerEmail === email && !p.isSample);
+}
 
+function seedSampleProducts(email: string) {
+  const products = await getAllProducts();
+  const samples = [
+    { name: "Cimento CP II 50 kg (exemplo)", costPrice: 32.20, salePrice: 42.0 },
+    { name: "Tijolo Cerâmico 9x19x19 (exemplo)", costPrice: 0.87, salePrice: 1.50 },
+    { name: "Argamassa AC-II 20 kg (exemplo)", costPrice: 19.30, salePrice: 28.0 },
+    { name: "Tinta Acrílica Branca 18 L (exemplo)", costPrice: 172.50, salePrice: 240.0 },
+    { name: "Tubo PVC Soldável 25 mm (3 m) (exemplo)", costPrice: 18.50, salePrice: 26.0 },
+  ];
+  samples.forEach(s => {
+    products.push({
+      id: crypto.randomUUID(),
+      ownerEmail: email,
+      ...s,
+      isSample: true,
+      createdAt: new Date().toISOString()
+    });
+  });
+  await saveAllProducts(products);
+}
 
 // API Routes
 
@@ -292,14 +328,7 @@ app.post("/api/register", async (req, res) => {
           from: `"${fromName}" <${fromEmail}>`,
           to: email,
           subject: "Ative sua conta e crie sua senha - Vírgula Contábil",
-          text: `Olá ${name},
-
-Obrigado por se cadastrar!
-
-Por favor, ative sua conta e defina sua senha clicando no link: ${verificationLink}
-
-Atenciosamente,
-Equipe Vírgula Contábil`,
+          text: `Olá ${name},\n\nObrigado por se cadastrar!\n\nPor favor, ative sua conta e defina sua senha clicando no link: ${verificationLink}\n\nAtenciosamente,\nEquipe Vírgula Contábil`,
           html: `
             <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden;">
               <div style="background-color: #10b981; padding: 20px; text-align: center;">
@@ -448,7 +477,7 @@ app.post("/api/login", async (req, res) => {
 
 // Admin Routes for Users
 app.get("/api/admin/users", requireAuth, async (req, res) => {
-  const users = (await getUsers()).map((u: any) => {
+  const users = await getUsers().map((u: any) => {
     const { passwordHash, activationToken, ...user } = u;
     return user;
   });
@@ -532,12 +561,7 @@ app.post("/api/forgot-password", async (req, res) => {
           from: `"${fromName}" <${fromEmail}>`,
           to: email,
           subject: "Recuperação de Senha - Vírgula Contábil",
-          text: `Olá ${users[userIndex].name},
-
-Para redefinir sua senha, clique no link a seguir: ${resetLink}
-
-Atenciosamente,
-Equipe Vírgula Contábil`,
+          text: `Olá ${users[userIndex].name},\n\nPara redefinir sua senha, clique no link a seguir: ${resetLink}\n\nAtenciosamente,\nEquipe Vírgula Contábil`,
           html: `
             <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden;">
               <div style="background-color: #10b981; padding: 20px; text-align: center;">
@@ -751,7 +775,7 @@ function requireExcelImport(req: any, res: any, next: any) {
   next();
 }
 
-app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) => {
+app.post("/api/products", requireUser, checkProductLimit, (req: any, res) => {
   const products = await getAllProducts();
   const newProduct = { ...req.body, ownerEmail: req.currentUser.email, id: crypto.randomUUID() };
   products.push(newProduct);
@@ -760,7 +784,7 @@ app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) 
 });
 
 app.get("/api/products", requireUser, async (req: any, res) => {
-  res.json((await getAllProducts()).filter((p: any) => p.ownerEmail === req.currentUser.email));
+  res.json(await getAllProducts().filter((p: any) => p.ownerEmail === req.currentUser.email));
 });
 
 import multer from "multer";
@@ -913,9 +937,7 @@ async function setupVite() {
     }
   });
 
-  app.listen(PORT, "0.0.0.0", async () => {
-    try { await db.execute(sql`CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value JSONB NOT NULL)`); } catch (err) { console.error("Database connection failed on startup. Is DATABASE_URL correct?", err); }
-
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT}`);
   });
 }

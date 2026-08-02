@@ -14,10 +14,10 @@ import { db } from "./src/db/index.js";
 import { store } from "./src/db/schema.js";
 import { eq, sql } from "drizzle-orm";
 
-async function getStore(key: string): Promise<any[]> {
+async function getStore(key) {
   try {
     const res = await db.select().from(store).where(eq(store.key, key));
-    return res.length > 0 ? (res[0].value as any[]) : [];
+    return res.length > 0 ? res[0].value : [];
   } catch(e) {
     console.error("DB Get Error", e);
     return [];
@@ -93,7 +93,7 @@ const transporter = nodemailer.createTransport({
 
 // Simple helper to read/write JSON
 // Authentication middleware
-async function requireAuth(req: any, res: any, next: any) {
+function requireAuth(req: any, res: any, next: any) {
   const token = req.cookies.admin_token;
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -106,7 +106,7 @@ async function requireAuth(req: any, res: any, next: any) {
   }
 }
 
-async function requireUser(req: any, res: any, next: any) {
+function requireUser(req: any, res: any, next: any) {
   const token = req.cookies.user_token;
   if (!token) return res.status(401).json({ error: "Não autenticado" });
   try {
@@ -448,7 +448,7 @@ app.post("/api/login", async (req, res) => {
 
 // Admin Routes for Users
 app.get("/api/admin/users", requireAuth, async (req, res) => {
-  const users = (await getUsers()).map((u: any) => {
+  const users = await getUsers().map((u: any) => {
     const { passwordHash, activationToken, ...user } = u;
     return user;
   });
@@ -751,7 +751,7 @@ function requireExcelImport(req: any, res: any, next: any) {
   next();
 }
 
-app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) => {
+app.post("/api/products", requireUser, checkProductLimit, (req: any, res) => {
   const products = await getAllProducts();
   const newProduct = { ...req.body, ownerEmail: req.currentUser.email, id: crypto.randomUUID() };
   products.push(newProduct);
@@ -760,7 +760,7 @@ app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) 
 });
 
 app.get("/api/products", requireUser, async (req: any, res) => {
-  res.json((await getAllProducts()).filter((p: any) => p.ownerEmail === req.currentUser.email));
+  res.json(await getAllProducts().filter((p: any) => p.ownerEmail === req.currentUser.email));
 });
 
 import multer from "multer";
@@ -914,7 +914,7 @@ async function setupVite() {
   });
 
   app.listen(PORT, "0.0.0.0", async () => {
-    try { await db.execute(sql`CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value JSONB NOT NULL)`); } catch (err) { console.error("Database connection failed on startup. Is DATABASE_URL correct?", err); }
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
 
     console.log(`Server running on port ${PORT}`);
   });
