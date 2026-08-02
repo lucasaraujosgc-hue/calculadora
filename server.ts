@@ -14,7 +14,12 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ 
+  limit: "50mb",
+  verify: (req: any, res, buf) => {
+    req.rawBody = buf.toString();
+  }
+}));
 app.use(cookieParser());
 
 const DATA_FILE = path.join(process.cwd(), "data", "courses.json");
@@ -471,7 +476,7 @@ app.post("/api/login", async (req, res) => {
 });
 
 // Admin Routes for Users
-app.get("/api/admin/users", (req, res) => {
+app.get("/api/admin/users", requireAuth, (req, res) => {
   const users = getUsers().map((u: any) => {
     const { passwordHash, activationToken, ...user } = u;
     return user;
@@ -479,7 +484,7 @@ app.get("/api/admin/users", (req, res) => {
   res.json(users);
 });
 
-app.delete("/api/admin/users/:email", (req, res) => {
+app.delete("/api/admin/users/:email", requireAuth, (req, res) => {
   let users = getUsers();
   const emailToDelete = req.params.email;
   users = users.filter((u: any) => u.email !== emailToDelete);
@@ -681,8 +686,30 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
   }
 });
 
-app.post("/api/webhooks/pagarme", async (req, res) => {
+app.post("/api/webhooks/pagarme", async (req: any, res) => {
   try {
+    const secret = process.env.PAGARME_WEBHOOK_SECRET;
+    if (secret) {
+      const signature = req.headers['x-hub-signature'] || req.headers['hub-signature'] || req.headers['x-pagarme-webhook-signature'];
+      if (!signature) {
+        return res.status(401).json({ error: "Assinatura ausente" });
+      }
+      const payload = req.rawBody || JSON.stringify(req.body);
+      
+      const sha1 = crypto.createHmac('sha1', secret).update(payload).digest('hex');
+      const sha256 = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+      
+      const isValid = signature === `sha1=${sha1}` || 
+                      signature === `sha256=${sha256}` || 
+                      signature === sha1 || 
+                      signature === sha256;
+                      
+      if (!isValid) {
+        console.error("Assinatura Pagar.me inválida.");
+        return res.status(401).json({ error: "Assinatura inválida" });
+      }
+    }
+
     const event = req.body;
 
     if (event.type === "order.paid") {
