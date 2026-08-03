@@ -5,6 +5,8 @@ import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
 import * as dotenv from "dotenv";
+import rateLimit from "express-rate-limit";
+import { z } from "zod";
 import nodemailer from "nodemailer";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -14,10 +16,10 @@ import { db } from "./src/db/index.js";
 import { store } from "./src/db/schema.js";
 import { eq, sql } from "drizzle-orm";
 
-async function getStore(key) {
+async function getStore(key: string): Promise<any[]> {
   try {
     const res = await db.select().from(store).where(eq(store.key, key));
-    return res.length > 0 ? res[0].value : [];
+    return res.length > 0 ? (res[0].value as any[]) : [];
   } catch(e) {
     console.error("DB Get Error", e);
     return [];
@@ -35,6 +37,12 @@ async function saveStore(key, value) {
   }
 }
 
+
+
+async function getFixedCosts() { return await getStore('fixed_costs'); }
+async function saveFixedCosts(costs: any) { await saveStore('fixed_costs', costs); }
+async function getWebhookEvents() { return await getStore('webhook_events'); }
+async function saveWebhookEvents(events: any) { await saveStore('webhook_events', events); }
 async function getUsers() { return await getStore('users'); }
 async function saveUsers(users) { await saveStore('users', users); }
 async function getCourses() { return await getStore('courses'); }
@@ -62,13 +70,27 @@ async function seedSampleProducts(email) {
 }
 
 
+
 dotenv.config();
 
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET não configurado. Defina a variável de ambiente JWT_SECRET.");
+}
+
+
 const app = express();
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // limit each IP to 20 requests per windowMs
+  message: { error: "Muitas tentativas, tente novamente mais tarde." }
+});
+
 const PORT = 3000;
 
 app.use(express.json({ 
-  limit: "50mb",
+  limit: "1mb",
   verify: (req: any, res, buf) => {
     req.rawBody = buf.toString();
   }
@@ -93,24 +115,24 @@ const transporter = nodemailer.createTransport({
 
 // Simple helper to read/write JSON
 // Authentication middleware
-function requireAuth(req: any, res: any, next: any) {
+async function requireAuth(req: any, res: any, next: any) {
   const token = req.cookies.admin_token;
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
-    jwt.verify(token, process.env.JWT_SECRET || "default-secret");
+    jwt.verify(token, JWT_SECRET);
     next();
   } catch (err) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 }
 
-function requireUser(req: any, res: any, next: any) {
+async function requireUser(req: any, res: any, next: any) {
   const token = req.cookies.user_token;
   if (!token) return res.status(401).json({ error: "Não autenticado" });
   try {
-    const payload: any = jwt.verify(token, process.env.JWT_SECRET || "default-secret");
+    const payload: any = jwt.verify(token, JWT_SECRET);
     const users = await getUsers();
     const user = users.find((u: any) => u.email === payload.email);
     if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
@@ -243,7 +265,7 @@ app.post("/api/leads", async (req, res) => {
 });
 
 // Registration route
-app.post("/api/register", async (req, res) => {
+app.post("/api/register", authLimiter, async (req, res) => {
   try {
     const { name, phone } = req.body;
     const email = req.body.email?.trim().toLowerCase();
@@ -372,7 +394,7 @@ app.post("/api/verify", async (req, res) => {
   }
 });
 
-app.post("/api/login", async (req, res) => {
+app.post("/api/login", authLimiter, async (req, res) => {
   try {
     const { password } = req.body;
     const email = req.body.email?.trim().toLowerCase();
@@ -381,7 +403,7 @@ app.post("/api/login", async (req, res) => {
     if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
       const adminToken = jwt.sign(
         { email: process.env.ADMIN_EMAIL, role: 'admin' },
-        process.env.JWT_SECRET || "default-secret",
+        JWT_SECRET,
         { expiresIn: "30d" }
       );
       res.cookie("admin_token", adminToken, {
@@ -428,7 +450,7 @@ app.post("/api/login", async (req, res) => {
     
     const token = jwt.sign(
       { email: user.email, role: user.role || 'user' },
-      process.env.JWT_SECRET || "default-secret",
+      JWT_SECRET,
       { expiresIn: "30d" }
     );
 
@@ -446,9 +468,19 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+app.get("/api/me", requireUser, async (req: any, res: any) => {
+  const users = await getUsers();
+  const user = users.find((u: any) => u.email === req.currentUser.email);
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  const { passwordHash, activationToken, ...userWithoutSensitiveData } = user;
+  res.json({ success: true, user: userWithoutSensitiveData });
+});
+
 // Admin Routes for Users
 app.get("/api/admin/users", requireAuth, async (req, res) => {
-  const users = await getUsers().map((u: any) => {
+  const users = (await getUsers()).map((u: any) => {
     const { passwordHash, activationToken, ...user } = u;
     return user;
   });
@@ -463,11 +495,12 @@ app.delete("/api/admin/users/:email", requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
-app.post("/api/change-password", async (req, res) => {
+app.post("/api/change-password", requireUser, async (req: any, res) => {
   try {
-    const { email, currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body;
+    const email = req.currentUser.email; // get email from authenticated user
     
-    if (!email || !currentPassword || !newPassword) {
+    if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: "Dados incompletos" });
     }
 
@@ -503,7 +536,7 @@ app.post("/api/change-password", async (req, res) => {
   }
 });
 
-app.post("/api/forgot-password", async (req, res) => {
+app.post("/api/forgot-password", authLimiter, async (req, res) => {
   try {
     const email = req.body.email?.trim().toLowerCase();
     if (!email) return res.status(400).json({ error: "E-mail é obrigatório." });
@@ -516,7 +549,9 @@ app.post("/api/forgot-password", async (req, res) => {
     }
 
     const resetToken = crypto.randomBytes(20).toString('hex');
-    users[userIndex].resetToken = resetToken;
+    const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+    users[userIndex].resetTokenHash = resetTokenHash;
+    users[userIndex].resetTokenExpiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes
     await saveUsers(users);
 
     if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
@@ -571,13 +606,14 @@ Equipe Vírgula Contábil`,
   }
 });
 
-app.post("/api/reset-password", async (req, res) => {
+app.post("/api/reset-password", authLimiter, async (req, res) => {
   try {
     const { token, password } = req.body;
     if (!token || !password) return res.status(400).json({ error: "Dados incompletos." });
 
     const users = await getUsers();
-    const userIndex = users.findIndex((u: any) => u.resetToken === token);
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const userIndex = users.findIndex((u: any) => u.resetTokenHash === tokenHash && u.resetTokenExpiresAt > Date.now());
     
     if (userIndex === -1) {
       return res.status(400).json({ error: "Token inválido ou expirado." });
@@ -587,7 +623,8 @@ app.post("/api/reset-password", async (req, res) => {
     const newPasswordHash = await bcrypt.hash(password, salt);
     
     users[userIndex].passwordHash = newPasswordHash;
-    users[userIndex].resetToken = null; // consume token
+    users[userIndex].resetTokenHash = undefined;
+    users[userIndex].resetTokenExpiresAt = undefined;
     await saveUsers(users);
     
     res.json({ success: true, message: "Senha redefinida com sucesso." });
@@ -623,6 +660,9 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
         name: `Plano ${plan.name} - ${user.email}`,
         order_code: orderCode,
         max_paid_sessions: 1,
+        checkout_settings: {
+          success_url: `${req.protocol}://${req.get("host")}/`
+        },
         payment_settings: {
           accepted_payment_methods: ["credit_card", "pix"],
           credit_card_settings: {
@@ -664,64 +704,102 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
 app.post("/api/webhooks/pagarme", async (req: any, res) => {
   try {
     const secret = process.env.PAGARME_WEBHOOK_SECRET;
+    if (process.env.NODE_ENV === "production" && !secret) {
+      console.error("PAGARME_WEBHOOK_SECRET não configurado em produção.");
+      return res.status(500).json({ error: "Configuração do servidor inválida para processar webhooks." });
+    }
     if (secret) {
       const signature = req.headers['x-hub-signature'] || req.headers['hub-signature'] || req.headers['x-pagarme-webhook-signature'];
       if (!signature) {
         return res.status(401).json({ error: "Assinatura ausente" });
       }
       const payload = req.rawBody || JSON.stringify(req.body);
+      const parts = (signature as string).split("=");
+      const providedSignature = parts.length > 1 ? parts[1] : parts[0];
       
-      const sha1 = crypto.createHmac('sha1', secret).update(payload).digest('hex');
-      const sha256 = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+      const expectedSignature = crypto
+        .createHmac("sha1", secret)
+        .update(payload)
+        .digest("hex");
       
-      const isValid = signature === `sha1=${sha1}` || 
-                      signature === `sha256=${sha256}` || 
-                      signature === sha1 || 
-                      signature === sha256;
-                      
-      if (!isValid) {
-        console.error("Assinatura Pagar.me inválida.");
+      if (providedSignature !== expectedSignature) {
         return res.status(401).json({ error: "Assinatura inválida" });
       }
     }
 
     const event = req.body;
+    const eventId = event.id;
+
+    if (eventId) {
+      const webhookEvents = await getWebhookEvents();
+      const existingEvent = webhookEvents.find((e: any) => e.eventId === eventId);
+      
+      if (existingEvent && existingEvent.status === "processed") {
+        return res.json({ success: true, message: "Evento já processado." });
+      }
+
+      if (!existingEvent) {
+        webhookEvents.push({
+          id: crypto.randomUUID(),
+          eventId: eventId,
+          eventType: event.type,
+          status: "pending",
+          receivedAt: new Date().toISOString()
+        });
+        await saveWebhookEvents(webhookEvents);
+      }
+    }
 
     if (event.type === "order.paid") {
       const orderCode = event.data?.code;
-      const payments = await getPayments();
-      const payment = payments.find((p: any) => p.orderCode === orderCode);
+      if (orderCode) {
+        const payments = await getPayments();
+        const payment = payments.find((p: any) => p.orderCode === orderCode);
+        if (payment && payment.status !== "paid") {
+          payment.status = "paid";
+          await savePayments(payments);
 
-      if (payment) {
-        const plan = PLANS[payment.planId as PlanId];
-        const users = await getUsers();
-        const idx = users.findIndex((u: any) => u.email === payment.email);
-
-        if (idx !== -1 && plan) {
-          users[idx].plan = plan.id;
-          users[idx].productLimit = plan.productLimit;
-          users[idx].proSince = new Date().toISOString();
-          await saveUsers(users);
-
-          // Plano Ilimitado inclui call de consultoria — avisa o time
-          if (plan.consultingCall && process.env.SMTP_HOST) {
-            await transporter.sendMail({
-              from: `"Vírgula Contábil" <${process.env.SMTP_FROM_EMAIL}>`,
-              to: process.env.SALES_TEAM_EMAIL,
-              subject: `Nova assinatura Ilimitado - agendar consultoria: ${users[idx].email}`,
-              text: `O usuário ${users[idx].name} (${users[idx].email}) comprou o plano Ilimitado e tem direito a uma call de consultoria. Entre em contato para agendar.`
-            });
+          const users = await getUsers();
+          const userIndex = users.findIndex((u: any) => u.email === payment.email);
+          if (userIndex !== -1) {
+            users[userIndex].plan = payment.planId;
+            await saveUsers(users);
           }
         }
+      }
+    }
 
-        payment.status = "paid";
-        await savePayments(payments);
+    if (eventId) {
+      const webhookEvents = await getWebhookEvents();
+      const existingEventIndex = webhookEvents.findIndex((e: any) => e.eventId === eventId);
+      if (existingEventIndex !== -1) {
+        webhookEvents[existingEventIndex].status = "processed";
+        webhookEvents[existingEventIndex].processedAt = new Date().toISOString();
+        await saveWebhookEvents(webhookEvents);
       }
     }
 
     res.status(200).json({ received: true });
   } catch (error) {
     console.error("Erro no webhook Pagar.me:", error);
+    
+    // Log erro for retry
+    const event = req.body;
+    const eventId = event?.id;
+    if (eventId) {
+      try {
+        const webhookEvents = await getWebhookEvents();
+        const existingEventIndex = webhookEvents.findIndex((e: any) => e.eventId === eventId);
+        if (existingEventIndex !== -1) {
+          webhookEvents[existingEventIndex].status = "error";
+          webhookEvents[existingEventIndex].errorMessage = (error as Error).message;
+          await saveWebhookEvents(webhookEvents);
+        }
+      } catch (err) {
+        // fail silently
+      }
+    }
+
     res.status(200).json({ received: true, error: true });
   }
 });
@@ -730,7 +808,7 @@ async function checkProductLimit(req: any, res: any, next: any) {
   const user = req.currentUser;
   const limit = user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7);
   
-  const current = await getUserRealProducts(user.email).length;
+  const current = (await getUserRealProducts(user.email)).length;
   if (current >= limit) {
     return res.status(403).json({
       error: `Limite de ${limit} produtos atingido. Faça upgrade para cadastrar mais.`,
@@ -751,7 +829,7 @@ function requireExcelImport(req: any, res: any, next: any) {
   next();
 }
 
-app.post("/api/products", requireUser, checkProductLimit, (req: any, res) => {
+app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) => {
   const products = await getAllProducts();
   const newProduct = { ...req.body, ownerEmail: req.currentUser.email, id: crypto.randomUUID() };
   products.push(newProduct);
@@ -760,8 +838,63 @@ app.post("/api/products", requireUser, checkProductLimit, (req: any, res) => {
 });
 
 app.get("/api/products", requireUser, async (req: any, res) => {
-  res.json(await getAllProducts().filter((p: any) => p.ownerEmail === req.currentUser.email));
+  res.json((await getAllProducts()).filter((p: any) => p.ownerEmail === req.currentUser.email));
 });
+
+app.get("/api/fixed-costs", requireUser, async (req: any, res: any) => {
+  const costs = await getFixedCosts();
+  res.json(costs.filter((c: any) => c.ownerEmail === req.currentUser.email));
+});
+
+app.post("/api/fixed-costs", requireUser, async (req: any, res: any) => {
+  const costs = await getFixedCosts();
+  const newCost = { ...req.body, ownerEmail: req.currentUser.email, id: req.body.id || crypto.randomUUID() };
+  costs.push(newCost);
+  await saveFixedCosts(costs);
+  res.json({ success: true, cost: newCost });
+});
+
+app.put("/api/fixed-costs/:id", requireUser, async (req: any, res: any) => {
+  const costs = await getFixedCosts();
+  const idx = costs.findIndex((c: any) => c.id === req.params.id && c.ownerEmail === req.currentUser.email);
+  if (idx === -1) return res.status(404).json({ error: "Custo não encontrado" });
+  
+  costs[idx] = { ...costs[idx], ...req.body, id: costs[idx].id, ownerEmail: req.currentUser.email };
+  await saveFixedCosts(costs);
+  res.json({ success: true, cost: costs[idx] });
+});
+
+app.delete("/api/fixed-costs/:id", requireUser, async (req: any, res: any) => {
+  const costs = await getFixedCosts();
+  const idx = costs.findIndex((c: any) => c.id === req.params.id && c.ownerEmail === req.currentUser.email);
+  if (idx === -1) return res.status(404).json({ error: "Custo não encontrado" });
+  
+  costs.splice(idx, 1);
+  await saveFixedCosts(costs);
+  res.json({ success: true });
+});
+
+
+app.put("/api/products/:id", requireUser, async (req: any, res: any) => {
+  const products = await getAllProducts();
+  const idx = products.findIndex((p: any) => p.id === req.params.id && p.ownerEmail === req.currentUser.email);
+  if (idx === -1) return res.status(404).json({ error: "Produto não encontrado" });
+  
+  products[idx] = { ...products[idx], ...req.body, id: products[idx].id, ownerEmail: req.currentUser.email };
+  await saveAllProducts(products);
+  res.json({ success: true, product: products[idx] });
+});
+
+app.delete("/api/products/:id", requireUser, async (req: any, res: any) => {
+  const products = await getAllProducts();
+  const idx = products.findIndex((p: any) => p.id === req.params.id && p.ownerEmail === req.currentUser.email);
+  if (idx === -1) return res.status(404).json({ error: "Produto não encontrado" });
+  
+  products.splice(idx, 1);
+  await saveAllProducts(products);
+  res.json({ success: true });
+});
+
 
 import multer from "multer";
 import * as XLSX from "xlsx";
@@ -782,18 +915,34 @@ app.post(
       const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
       const products = await getAllProducts();
+      const userProducts = products.filter((p: any) => p.ownerEmail === req.currentUser.email && !p.isSample);
+      const currentCount = userProducts.length;
+      const limit = req.currentUser.plan === 'ilimitado' ? Infinity : (req.currentUser.productLimit || 7);
+      
       const imported: any[] = [];
       const errors: any[] = [];
+      const validRows: any[] = [];
 
       rows.forEach((row, i) => {
         const nome = row.nome || row.Nome || row.produto || row.Produto;
         const precoCusto = row.preco_custo ?? row["Preço de Custo"] ?? row.custo;
         const precoVenda = row.preco_venda ?? row["Preço de Venda"] ?? row.preco;
 
-        if (!nome || precoCusto == null) {
-          errors.push({ linha: i + 2, motivo: "Faltando nome ou preço de custo" });
+        if (!nome || precoCusto == null || isNaN(Number(precoCusto))) {
+          errors.push({ linha: i + 2, motivo: "Faltando nome ou preço de custo inválido" });
           return;
         }
+        validRows.push({nome, precoCusto, precoVenda});
+      });
+
+      if (currentCount + validRows.length > limit) {
+        return res.status(403).json({
+          error: `Limite excedido. Você possui ${currentCount} produtos de um limite de ${limit}. A planilha contém ${validRows.length} produtos válidos. A importação não pode ser realizada.`
+        });
+      }
+
+      validRows.forEach(row => {
+        const { nome, precoCusto, precoVenda } = row;
 
         const product = {
           id: crypto.randomUUID(),
@@ -914,7 +1063,7 @@ async function setupVite() {
   });
 
   app.listen(PORT, "0.0.0.0", async () => {
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
+    try { await db.execute(sql`CREATE TABLE IF NOT EXISTS store (key TEXT PRIMARY KEY, value JSONB NOT NULL)`); } catch (err) { console.error("Database connection failed on startup. Is DATABASE_URL correct?", err); }
 
     console.log(`Server running on port ${PORT}`);
   });

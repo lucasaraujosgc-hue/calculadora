@@ -1,0 +1,38 @@
+--- server.ts
++++ server.ts
+@@ -282,6 +282,34 @@
+   res.json(myProducts);
+ });
+ 
++app.post("/api/products/sync", requireUser, async (req: any, res) => {
++  try {
++    const incomingProducts = req.body;
++    if (!Array.isArray(incomingProducts)) {
++      return res.status(400).json({ error: "Invalid data format" });
++    }
++    
++    await db.transaction(async (tx) => {
++      // Apagar todos os produtos não sample do usuario
++      await tx.delete(products).where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
++      
++      // Reinserir
++      for (const p of incomingProducts) {
++        await tx.insert(products).values({
++          userId: req.currentUser.id,
++          name: p.nome || p.name,
++          costPrice: p.custo || p.costPrice || 0,
++          salePrice: p.precoVenda || p.salePrice || 0,
++          projectedSales: p.vendasProjetadas || p.projectedSales || 0,
++          isSample: false
++        });
++      }
++    });
++    res.json({ success: true });
++  } catch (error) {
++    res.status(500).json({ error: "Erro ao sincronizar produtos" });
++  }
++});
++
+ app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) => {
+   const newProduct = await db.insert(products).values({
+     userId: req.currentUser.id,
