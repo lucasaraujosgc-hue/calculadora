@@ -4,7 +4,7 @@ import { useAppContext } from '../context/AppContext';
 import { Link } from 'react-router-dom';
 
 export default function CustosVariaveis() {
-  const { user, produtos, setProdutos, isGuest } = useAppContext();
+  const { user, produtos, setProdutos, saveProduto, removeProduto, isGuest } = useAppContext();
   const [novoNome, setNovoNome] = useState('');
   const [novoCmv, setNovoCmv] = useState('');
   const [vendasProjetadas, setVendasProjetadas] = useState('');
@@ -29,7 +29,7 @@ export default function CustosVariaveis() {
       margem: 0,
       percentualRateio: 0
     };
-    setProdutos([...produtos, item]);
+    saveProduto(item);
     setNovoNome('');
     setNovoCmv('');
     setVendasProjetadas('');
@@ -93,7 +93,7 @@ export default function CustosVariaveis() {
   };
 
   const handleRemove = (id: string) => {
-    setProdutos(produtos.filter(p => p.id !== id));
+    removeProduto(id);
   };
 
   const handleClear = () => {
@@ -102,7 +102,7 @@ export default function CustosVariaveis() {
       setTimeout(() => setIsConfirmingClear(false), 3000);
       return;
     }
-    setProdutos([]);
+    produtos.forEach(p => removeProduto(p.id));
     setIsConfirmingClear(false);
   };
 

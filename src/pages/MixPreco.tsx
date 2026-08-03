@@ -3,20 +3,25 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
 
 export default function MixPreco() {
-  const { produtos, custosFixos, setProdutos } = useAppContext();
+  const { produtos, custosFixos, saveProduto, setProdutos } = useAppContext();
   const [useGlobalImposto, setUseGlobalImposto] = useState(false);
   const [globalImposto, setGlobalImposto] = useState(0);
 
   const custoFixoTotal = custosFixos.reduce((acc, curr) => acc + curr.valor, 0);
 
-  const handleUpdateProduto = (id: string, field: keyof ProdutoItem, value: number) => {
+  const handleUpdateProduto = (id: string, field: keyof ProdutoItem, value: number | string) => {
+    let updatedProduto;
     const updated = produtos.map(p => {
       if (p.id === id) {
-        return { ...p, [field]: value };
+        updatedProduto = { ...p, [field]: value };
+        return updatedProduto;
       }
       return p;
     });
     setProdutos(updated);
+    if (updatedProduto) {
+      saveProduto(updatedProduto).catch(err => console.error(err));
+    }
   };
 
   const totalRateio = produtos.reduce((acc, p) => acc + (p.percentualRateio || 0), 0);

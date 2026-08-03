@@ -4,7 +4,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
 export default function CustoFixo() {
-  const { custosFixos, setCustosFixos } = useAppContext();
+  const { custosFixos, saveCustoFixo, removeCustoFixo } = useAppContext();
   const [quantidadeMensal, setQuantidadeMensal] = useState(1000);
   const [novoNome, setNovoNome] = useState('');
   const [novoValor, setNovoValor] = useState('');
@@ -15,13 +15,13 @@ export default function CustoFixo() {
   const handleAdd = () => {
     if (!novoNome || !novoValor) return;
     const item = { id: Date.now().toString(), nome: novoNome, valor: Number(novoValor) };
-    setCustosFixos([...custosFixos, item]);
+    saveCustoFixo(item);
     setNovoNome('');
     setNovoValor('');
   };
 
   const handleRemove = (id: string) => {
-    setCustosFixos(custosFixos.filter(c => c.id !== id));
+    removeCustoFixo(id);
   };
 
   const chartData = [0.5, 0.75, 1, 1.25, 1.5, 2].map(multiplier => {

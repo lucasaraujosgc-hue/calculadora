@@ -91,7 +91,7 @@ const PriceInput = ({
 };
 
 export default function MixPrecoLote() {
-  const { produtos, custosFixos, setProdutos } = useAppContext();
+  const { produtos, custosFixos, setProdutos, syncProdutos } = useAppContext();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('todos');
@@ -130,7 +130,7 @@ export default function MixPrecoLote() {
 
   const handleUpdateProduto = (id: string, updates: Partial<ProdutoItem>) => {
     const updated = produtos.map(p => (p.id === id ? { ...p, ...updates } : p));
-    setProdutos(updated);
+    setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
   };
 
   const totalRateio = produtos.reduce((acc, p) => acc + (p.percentualRateio || 0), 0);
@@ -277,7 +277,7 @@ export default function MixPrecoLote() {
         ? Number((100 - fatia * (produtos.length - 1)).toFixed(4))
         : Number(fatia.toFixed(4)),
     }));
-    setProdutos(updated);
+    setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
   };
 
   const handleDistribuirPendenteEntreSemRateio = () => {
@@ -287,7 +287,7 @@ export default function MixPrecoLote() {
     const updated = produtos.map(p =>
       semRateioIds.includes(p.id) ? { ...p, percentualRateio: Number(fatia.toFixed(4)) } : p
     );
-    setProdutos(updated);
+    setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
   };
 
   // Aplica o mesmo valor de um campo (margem, taxa, imposto ou outros) para todos os produtos,
@@ -305,7 +305,7 @@ export default function MixPrecoLote() {
     });
 
     const updated = produtos.map(p => ({ ...p, [meta.productKey]: value }));
-    setProdutos(updated);
+    setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
   };
 
   // Desfaz a aplicação em massa, restaurando os valores individuais que cada produto tinha antes.
@@ -317,7 +317,7 @@ export default function MixPrecoLote() {
       ...p,
       [meta.productKey]: snap[p.id] ?? p[meta.productKey],
     }));
-    setProdutos(updated);
+    setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
     setBulkSnapshots(prev => {
       const next = { ...prev };
       delete next[field];

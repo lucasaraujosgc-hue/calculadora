@@ -3,7 +3,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis
 import { useAppContext } from '../context/AppContext';
 
 export default function FormacaoPreco() {
-  const { produtos, custosFixos, setProdutos } = useAppContext();
+  const { produtos, custosFixos, saveProduto } = useAppContext();
   
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   
@@ -59,7 +59,7 @@ export default function FormacaoPreco() {
       }
       return p;
     });
-    setProdutos(updated);
+    saveProduto(updated.find(p => p.id === selectedProductId)!);
     alert('Valores salvos no produto!');
   };
 

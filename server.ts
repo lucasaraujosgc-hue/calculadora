@@ -35,6 +35,12 @@ async function saveStore(key, value) {
   }
 }
 
+
+
+async function getFixedCosts() { return await getStore('fixed_costs'); }
+async function saveFixedCosts(costs: any) { await saveStore('fixed_costs', costs); }
+async function getWebhookEvents() { return await getStore('webhook_events'); }
+async function saveWebhookEvents(events: any) { await saveStore('webhook_events', events); }
 async function getUsers() { return await getStore('users'); }
 async function saveUsers(users) { await saveStore('users', users); }
 async function getCourses() { return await getStore('courses'); }
@@ -62,7 +68,11 @@ async function seedSampleProducts(email) {
 }
 
 
+
 dotenv.config();
+
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development_only";
+
 
 const app = express();
 const PORT = 3000;
@@ -99,7 +109,7 @@ async function requireAuth(req: any, res: any, next: any) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
-    jwt.verify(token, process.env.JWT_SECRET || "default-secret");
+    jwt.verify(token, JWT_SECRET);
     next();
   } catch (err) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -110,7 +120,7 @@ async function requireUser(req: any, res: any, next: any) {
   const token = req.cookies.user_token;
   if (!token) return res.status(401).json({ error: "Não autenticado" });
   try {
-    const payload: any = jwt.verify(token, process.env.JWT_SECRET || "default-secret");
+    const payload: any = jwt.verify(token, JWT_SECRET);
     const users = await getUsers();
     const user = users.find((u: any) => u.email === payload.email);
     if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
@@ -381,7 +391,7 @@ app.post("/api/login", async (req, res) => {
     if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
       const adminToken = jwt.sign(
         { email: process.env.ADMIN_EMAIL, role: 'admin' },
-        process.env.JWT_SECRET || "default-secret",
+        JWT_SECRET,
         { expiresIn: "30d" }
       );
       res.cookie("admin_token", adminToken, {
@@ -428,7 +438,7 @@ app.post("/api/login", async (req, res) => {
     
     const token = jwt.sign(
       { email: user.email, role: user.role || 'user' },
-      process.env.JWT_SECRET || "default-secret",
+      JWT_SECRET,
       { expiresIn: "30d" }
     );
 
@@ -444,6 +454,16 @@ app.post("/api/login", async (req, res) => {
     console.error("Login error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+app.get("/api/me", requireUser, async (req: any, res: any) => {
+  const users = await getUsers();
+  const user = users.find((u: any) => u.email === req.currentUser.email);
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  const { passwordHash, activationToken, ...userWithoutSensitiveData } = user;
+  res.json({ success: true, user: userWithoutSensitiveData });
 });
 
 // Admin Routes for Users
@@ -463,11 +483,12 @@ app.delete("/api/admin/users/:email", requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
-app.post("/api/change-password", async (req, res) => {
+app.post("/api/change-password", requireUser, async (req: any, res) => {
   try {
-    const { email, currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body;
+    const email = req.currentUser.email; // get email from authenticated user
     
-    if (!email || !currentPassword || !newPassword) {
+    if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: "Dados incompletos" });
     }
 
@@ -516,7 +537,9 @@ app.post("/api/forgot-password", async (req, res) => {
     }
 
     const resetToken = crypto.randomBytes(20).toString('hex');
-    users[userIndex].resetToken = resetToken;
+    const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+    users[userIndex].resetTokenHash = resetTokenHash;
+    users[userIndex].resetTokenExpiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes
     await saveUsers(users);
 
     if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
@@ -577,7 +600,8 @@ app.post("/api/reset-password", async (req, res) => {
     if (!token || !password) return res.status(400).json({ error: "Dados incompletos." });
 
     const users = await getUsers();
-    const userIndex = users.findIndex((u: any) => u.resetToken === token);
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const userIndex = users.findIndex((u: any) => u.resetTokenHash === tokenHash && u.resetTokenExpiresAt > Date.now());
     
     if (userIndex === -1) {
       return res.status(400).json({ error: "Token inválido ou expirado." });
@@ -587,7 +611,8 @@ app.post("/api/reset-password", async (req, res) => {
     const newPasswordHash = await bcrypt.hash(password, salt);
     
     users[userIndex].passwordHash = newPasswordHash;
-    users[userIndex].resetToken = null; // consume token
+    users[userIndex].resetTokenHash = undefined;
+    users[userIndex].resetTokenExpiresAt = undefined;
     await saveUsers(users);
     
     res.json({ success: true, message: "Senha redefinida com sucesso." });
@@ -623,6 +648,9 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
         name: `Plano ${plan.name} - ${user.email}`,
         order_code: orderCode,
         max_paid_sessions: 1,
+        checkout_settings: {
+          success_url: `${req.protocol}://${req.get("host")}/`
+        },
         payment_settings: {
           accepted_payment_methods: ["credit_card", "pix"],
           credit_card_settings: {
@@ -664,6 +692,10 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
 app.post("/api/webhooks/pagarme", async (req: any, res) => {
   try {
     const secret = process.env.PAGARME_WEBHOOK_SECRET;
+    if (process.env.NODE_ENV === "production" && !secret) {
+      console.error("PAGARME_WEBHOOK_SECRET não configurado em produção.");
+      return res.status(500).json({ error: "Configuração do servidor inválida para processar webhooks." });
+    }
     if (secret) {
       const signature = req.headers['x-hub-signature'] || req.headers['hub-signature'] || req.headers['x-pagarme-webhook-signature'];
       if (!signature) {
@@ -686,6 +718,24 @@ app.post("/api/webhooks/pagarme", async (req: any, res) => {
     }
 
     const event = req.body;
+    const eventId = event.id;
+
+    if (eventId) {
+      const webhookEvents = await getWebhookEvents();
+      if (webhookEvents.find((e: any) => e.eventId === eventId)) {
+        return res.json({ success: true, message: "Evento já processado." });
+      }
+      
+      webhookEvents.push({
+        id: crypto.randomUUID(),
+        eventId: eventId,
+        eventType: event.type,
+        receivedAt: new Date().toISOString(),
+        processedAt: new Date().toISOString()
+      });
+      await saveWebhookEvents(webhookEvents);
+    }
+
 
     if (event.type === "order.paid") {
       const orderCode = event.data?.code;
@@ -730,7 +780,7 @@ async function checkProductLimit(req: any, res: any, next: any) {
   const user = req.currentUser;
   const limit = user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7);
   
-  const current = await getUserRealProducts(user.email).length;
+  const current = (await getUserRealProducts(user.email)).length;
   if (current >= limit) {
     return res.status(403).json({
       error: `Limite de ${limit} produtos atingido. Faça upgrade para cadastrar mais.`,
@@ -763,6 +813,61 @@ app.get("/api/products", requireUser, async (req: any, res) => {
   res.json((await getAllProducts()).filter((p: any) => p.ownerEmail === req.currentUser.email));
 });
 
+app.get("/api/fixed-costs", requireUser, async (req: any, res: any) => {
+  const costs = await getFixedCosts();
+  res.json(costs.filter((c: any) => c.ownerEmail === req.currentUser.email));
+});
+
+app.post("/api/fixed-costs", requireUser, async (req: any, res: any) => {
+  const costs = await getFixedCosts();
+  const newCost = { ...req.body, ownerEmail: req.currentUser.email, id: req.body.id || crypto.randomUUID() };
+  costs.push(newCost);
+  await saveFixedCosts(costs);
+  res.json({ success: true, cost: newCost });
+});
+
+app.put("/api/fixed-costs/:id", requireUser, async (req: any, res: any) => {
+  const costs = await getFixedCosts();
+  const idx = costs.findIndex((c: any) => c.id === req.params.id && c.ownerEmail === req.currentUser.email);
+  if (idx === -1) return res.status(404).json({ error: "Custo não encontrado" });
+  
+  costs[idx] = { ...costs[idx], ...req.body, id: costs[idx].id, ownerEmail: req.currentUser.email };
+  await saveFixedCosts(costs);
+  res.json({ success: true, cost: costs[idx] });
+});
+
+app.delete("/api/fixed-costs/:id", requireUser, async (req: any, res: any) => {
+  const costs = await getFixedCosts();
+  const idx = costs.findIndex((c: any) => c.id === req.params.id && c.ownerEmail === req.currentUser.email);
+  if (idx === -1) return res.status(404).json({ error: "Custo não encontrado" });
+  
+  costs.splice(idx, 1);
+  await saveFixedCosts(costs);
+  res.json({ success: true });
+});
+
+
+app.put("/api/products/:id", requireUser, async (req: any, res: any) => {
+  const products = await getAllProducts();
+  const idx = products.findIndex((p: any) => p.id === req.params.id && p.ownerEmail === req.currentUser.email);
+  if (idx === -1) return res.status(404).json({ error: "Produto não encontrado" });
+  
+  products[idx] = { ...products[idx], ...req.body, id: products[idx].id, ownerEmail: req.currentUser.email };
+  await saveAllProducts(products);
+  res.json({ success: true, product: products[idx] });
+});
+
+app.delete("/api/products/:id", requireUser, async (req: any, res: any) => {
+  const products = await getAllProducts();
+  const idx = products.findIndex((p: any) => p.id === req.params.id && p.ownerEmail === req.currentUser.email);
+  if (idx === -1) return res.status(404).json({ error: "Produto não encontrado" });
+  
+  products.splice(idx, 1);
+  await saveAllProducts(products);
+  res.json({ success: true });
+});
+
+
 import multer from "multer";
 import * as XLSX from "xlsx";
 
@@ -782,18 +887,34 @@ app.post(
       const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
       const products = await getAllProducts();
+      const userProducts = products.filter((p: any) => p.ownerEmail === req.currentUser.email && !p.isSample);
+      const currentCount = userProducts.length;
+      const limit = req.currentUser.plan === 'ilimitado' ? Infinity : (req.currentUser.productLimit || 7);
+      
       const imported: any[] = [];
       const errors: any[] = [];
+      const validRows: any[] = [];
 
       rows.forEach((row, i) => {
         const nome = row.nome || row.Nome || row.produto || row.Produto;
         const precoCusto = row.preco_custo ?? row["Preço de Custo"] ?? row.custo;
         const precoVenda = row.preco_venda ?? row["Preço de Venda"] ?? row.preco;
 
-        if (!nome || precoCusto == null) {
-          errors.push({ linha: i + 2, motivo: "Faltando nome ou preço de custo" });
+        if (!nome || precoCusto == null || isNaN(Number(precoCusto))) {
+          errors.push({ linha: i + 2, motivo: "Faltando nome ou preço de custo inválido" });
           return;
         }
+        validRows.push({nome, precoCusto, precoVenda});
+      });
+
+      if (currentCount + validRows.length > limit) {
+        return res.status(403).json({
+          error: `Limite excedido. Você possui ${currentCount} produtos de um limite de ${limit}. A planilha contém ${validRows.length} produtos válidos. A importação não pode ser realizada.`
+        });
+      }
+
+      validRows.forEach(row => {
+        const { nome, precoCusto, precoVenda } = row;
 
         const product = {
           id: crypto.randomUUID(),
