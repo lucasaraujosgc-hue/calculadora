@@ -462,9 +462,13 @@ async function setupVite() {
     }
   });
 
-  app.listen(PORT, "0.0.0.0", async () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  if (process.env.NODE_ENV !== "test" && process.env.VITEST !== "true") {
+    app.listen(PORT, "0.0.0.0", async () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  }
 }
 
 setupVite();
+
+export { app };

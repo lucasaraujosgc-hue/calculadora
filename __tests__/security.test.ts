@@ -1,16 +1,69 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import request from 'supertest';
+import jwt from 'jsonwebtoken';
+import { app } from '../server.ts';
+import { db } from '../src/db/index.js';
+
+vi.mock('../src/db/index.js', () => {
+  const selectMock = vi.fn();
+  return {
+    db: {
+      select: selectMock,
+      insert: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn()
+    }
+  };
+});
 
 describe('Security Rules & Isolation', () => {
-  it('webhook should be idempotent', () => {
-    // Tests for webhook idempotency logic
-    expect(true).toBe(true);
-  });
-  
-  it('should isolate user data by user_id', () => {
-    expect(true).toBe(true);
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('login should apply rate limiting', () => {
-    expect(true).toBe(true);
+  it('login should apply rate limiting', async () => {
+    let res;
+    for (let i = 0; i < 22; i++) {
+      res = await request(app).post('/api/login').send({ email: 'test@example.com', password: 'password' });
+    }
+    expect(res.status).toBe(429);
+  });
+
+  it('webhook should be idempotent', async () => {
+    const mockWhere = vi.fn().mockResolvedValue([{ id: 1, eventId: 'evt_123', status: 'processed' }]);
+    const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
+    db.select.mockReturnValue({ from: mockFrom });
+
+    const res = await request(app)
+      .post('/api/webhooks/pagarme')
+      .set('x-pagarme-webhook-signature', 'fake_sig')
+      .send({ id: 'evt_123', type: 'order.paid' });
+      
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, message: "Evento já processado." });
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it('should isolate user data by user_id', async () => {
+    const userId = 999;
+    const email = 'test@example.com';
+    const token = jwt.sign({ email }, process.env.JWT_SECRET || 'super_secret_key_123');
+    
+    // First db.select() is for requireUser
+    // Second db.select() is for /api/products
+    const mockWhere = vi.fn()
+      .mockResolvedValueOnce([{ id: userId, email }])
+      .mockResolvedValueOnce([{ id: 1, name: 'Produto 1', userId }]);
+      
+    const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
+    db.select.mockReturnValue({ from: mockFrom });
+    
+    const res = await request(app)
+      .get('/api/products')
+      .set('Cookie', [`user_token=${token}`]);
+      
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ id: 1, name: 'Produto 1', userId }]);
+    expect(db.select).toHaveBeenCalled();
   });
 });

@@ -92,6 +92,18 @@ describe('Pricing Engine', () => {
     expect(calculateOperatingResult(products, 15000)).toBe(-4000);
   });
 
+  it('calculateSellingPrice - complete scenario', () => {
+    // custo = 100
+    // imposto = 10%
+    // taxa = 5%
+    // comissão = 2%
+    // margem = 20%
+    // Deductions = 0.10 + 0.05 + 0.02 + 0.20 = 0.37
+    // Selling Price = 100 / (1 - 0.37) = 100 / 0.63 = 158.730158...
+    const sp = calculateSellingPrice(100, 0.10, 0.05, 0.02, 0.20);
+    expect(sp).toBeCloseTo(158.73, 2);
+  });
+
   it('calculateSellingPrice', () => {
     // Cost: 50
     // Desired Margin: 30% (0.3)
