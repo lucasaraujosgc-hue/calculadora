@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Lock } from 'lucide-react';
+import { Plus, Trash2, Lock, Upload } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Link } from 'react-router-dom';
 
@@ -214,11 +214,12 @@ export default function CustosVariaveis() {
                  <Plus className="w-4 h-4 mr-1" /> Adicionar
                </button>
                
-               <label 
-                 className={`flex-1 flex items-center justify-center border border-primary text-primary px-4 py-2 rounded-md font-medium hover:bg-primary/5 transition-colors h-[38px] cursor-pointer ${isImporting || isLimitReached ? 'opacity-50 cursor-not-allowed' : ''}`}
-                 title="Importar de Planilha (Excel)"
-               >
-                 {isImporting ? 'Importando...' : 'Importar Excel'}
+               <label
+                 className={`flex-1 flex items-center justify-center border-2 border-dashed border-primary/50 text-primary bg-primary/5 px-4 py-2 rounded-md font-medium hover:bg-primary/10 hover:border-primary transition-all h-[38px] cursor-pointer ${isImporting || isLimitReached ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title="Importar de Planilha (Excel)"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                {isImporting ? 'Importando...' : 'Importar Excel'}
                  <input 
                    type="file" 
                    accept=".xlsx,.xls" 
