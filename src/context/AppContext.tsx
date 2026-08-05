@@ -80,8 +80,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return !(localUser || sessionUser);
   });
 
-  const [custosFixos, setCustosFixos] = useState<CustoFixoItem[]>([]);
-  const [produtos, setProdutos] = useState<ProdutoItem[]>([]);
+  const [custosFixos, setCustosFixos] = useState<CustoFixoItem[]>(() => {
+    const saved = localStorage.getItem('vc_custos') || sessionStorage.getItem('vc_custos');
+    const parsed = saved ? JSON.parse(saved) : null;
+    return parsed && parsed.length > 0 ? parsed : defaultCustos;
+  });
+  const [produtos, setProdutos] = useState<ProdutoItem[]>(() => {
+    const saved = localStorage.getItem('vc_produtos') || sessionStorage.getItem('vc_produtos');
+    const parsed = saved ? JSON.parse(saved) : null;
+    return parsed && parsed.length > 0 ? parsed : defaultProdutos;
+  });
 
   // Update product limit and plan when coming back to app (e.g., after checkout)
   useEffect(() => {
@@ -120,14 +128,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Guest mode
       const savedCustos = localStorage.getItem('vc_custos') || sessionStorage.getItem('vc_custos');
       if (savedCustos) {
-        setCustosFixos(JSON.parse(savedCustos));
+        const parsed = JSON.parse(savedCustos);
+        setCustosFixos(parsed.length > 0 ? parsed : [...defaultCustos]);
       } else {
         setCustosFixos([...defaultCustos]);
       }
 
       const savedProdutos = localStorage.getItem('vc_produtos') || sessionStorage.getItem('vc_produtos');
       if (savedProdutos) {
-        setProdutos(JSON.parse(savedProdutos));
+        const parsed = JSON.parse(savedProdutos);
+        setProdutos(parsed.length > 0 ? parsed : [...defaultProdutos]);
       } else {
         setProdutos([...defaultProdutos]);
       }
@@ -138,6 +148,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Only save if data is loaded and not during an initial uninitialized state
     if (!custosFixos || !produtos) return;
+    
+    // Prevent saving empty arrays over the initial defaults if they haven't been properly loaded
+    if (custosFixos.length === 0 && produtos.length === 0 && isGuest) {
+      const savedCustos = localStorage.getItem('vc_custos') || sessionStorage.getItem('vc_custos');
+      if (!savedCustos) return; // Wait until populated
+    }
 
     if (!user || isGuest) {
       const storage = localStorage.getItem('vc_custos') ? localStorage : sessionStorage;

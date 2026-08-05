@@ -303,25 +303,32 @@ app.get("/api/me", requireUser, (req: any, res) => {
 
 app.get("/api/fixed-costs", requireUser, async (req: any, res) => {
   const costs = await db.select().from(fixedCosts).where(eq(fixedCosts.userId, req.currentUser.id));
-  res.json(costs);
+  res.json(costs.map(c => ({
+    id: c.id,
+    nome: c.name,
+    valor: c.amount
+  })));
 });
 app.post("/api/fixed-costs", requireUser, async (req: any, res) => {
   const newCost = await db.insert(fixedCosts).values({
     userId: req.currentUser.id,
-    name: req.body.name || req.body.nome,
-    amount: req.body.amount || req.body.valor || 0
+    name: req.body.nome || req.body.name || "Novo Custo",
+    amount: req.body.valor || req.body.amount || 0
   }).returning();
-  res.json({ success: true, cost: newCost[0] });
+  const c = newCost[0];
+  res.json({ success: true, cost: { id: c.id, nome: c.name, valor: c.amount } });
 });
 app.put("/api/fixed-costs/:id", requireUser, async (req: any, res) => {
   const updated = await db.update(fixedCosts)
     .set({
-      name: req.body.name || req.body.nome,
-      amount: req.body.amount || req.body.valor
+      name: req.body.nome || req.body.name,
+      amount: req.body.valor || req.body.amount
     })
     .where(and(eq(fixedCosts.id, req.params.id as any), eq(fixedCosts.userId, req.currentUser.id))).returning();
-  if (updated.length > 0) res.json({ success: true, cost: updated[0] });
-  else res.status(404).json({ error: "Custo não encontrado" });
+  if (updated.length > 0) {
+    const c = updated[0];
+    res.json({ success: true, cost: { id: c.id, nome: c.name, valor: c.amount } });
+  } else res.status(404).json({ error: "Custo não encontrado" });
 });
 app.delete("/api/fixed-costs/:id", requireUser, async (req: any, res) => {
   await db.delete(fixedCosts).where(and(eq(fixedCosts.id, req.params.id as any), eq(fixedCosts.userId, req.currentUser.id)));
@@ -339,7 +346,14 @@ async function checkProductLimit(req: any, res: any, next: any) {
 
 app.get("/api/products", requireUser, async (req: any, res) => {
   const myProducts = await db.select().from(products).where(eq(products.userId, req.currentUser.id));
-  res.json(myProducts);
+  res.json(myProducts.map(p => ({
+    id: p.id,
+    nome: p.name,
+    cmv: p.costPrice,
+    precoVenda: p.salePrice,
+    vendasProjetadas: p.projectedSales,
+    isSample: p.isSample
+  })));
 });
 
 app.post("/api/products/sync", requireUser, async (req: any, res) => {
@@ -372,25 +386,43 @@ app.post("/api/products/sync", requireUser, async (req: any, res) => {
 app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) => {
   const newProduct = await db.insert(products).values({
     userId: req.currentUser.id,
-    name: req.body.name,
-    costPrice: req.body.costPrice || req.body.custo || 0,
-    salePrice: req.body.salePrice || req.body.precoVenda || 0,
-    projectedSales: req.body.projectedSales || req.body.vendasProjetadas || 0,
+    name: req.body.nome || req.body.name || "Novo Produto",
+    costPrice: req.body.cmv || req.body.costPrice || req.body.custo || 0,
+    salePrice: req.body.precoVenda || req.body.salePrice || 0,
+    projectedSales: req.body.vendasProjetadas || req.body.projectedSales || 0,
     isSample: false
   }).returning();
-  res.json({ success: true, product: newProduct[0] });
+  
+  const p = newProduct[0];
+  res.json({ success: true, product: {
+    id: p.id,
+    nome: p.name,
+    cmv: p.costPrice,
+    precoVenda: p.salePrice,
+    vendasProjetadas: p.projectedSales,
+    isSample: p.isSample
+  }});
 });
 app.put("/api/products/:id", requireUser, async (req: any, res) => {
   const updated = await db.update(products)
     .set({
-      name: req.body.name,
-      costPrice: req.body.costPrice,
-      salePrice: req.body.salePrice,
-      projectedSales: req.body.projectedSales
+      name: req.body.nome || req.body.name,
+      costPrice: req.body.cmv || req.body.costPrice,
+      salePrice: req.body.precoVenda || req.body.salePrice,
+      projectedSales: req.body.vendasProjetadas || req.body.projectedSales
     })
     .where(and(eq(products.id, req.params.id as any), eq(products.userId, req.currentUser.id))).returning();
-  if (updated.length > 0) res.json({ success: true, product: updated[0] });
-  else res.status(404).json({ error: "Produto não encontrado" });
+  if (updated.length > 0) {
+    const p = updated[0];
+    res.json({ success: true, product: {
+      id: p.id,
+      nome: p.name,
+      cmv: p.costPrice,
+      precoVenda: p.salePrice,
+      vendasProjetadas: p.projectedSales,
+      isSample: p.isSample
+    }});
+  } else res.status(404).json({ error: "Produto não encontrado" });
 });
 app.delete("/api/products/:id", requireUser, async (req: any, res) => {
   await db.delete(products).where(and(eq(products.id, req.params.id as any), eq(products.userId, req.currentUser.id)));
@@ -579,6 +611,10 @@ async function setupVite() {
   });
 
   if (process.env.NODE_ENV !== "test" && process.env.VITEST !== "true") {
+    // Run migrations on startup
+    const { runMigrations } = await import("./src/db/migrate.js");
+    await runMigrations();
+
     app.listen(PORT, "0.0.0.0", async () => {
       console.log(`Server running on port ${PORT}`);
     });

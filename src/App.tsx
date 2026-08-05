@@ -5,8 +5,6 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
 import FormacaoPreco from './pages/FormacaoPreco';
-import MixPreco from './pages/MixPreco';
-import MixPrecoLote from './pages/MixPrecoLote';
 import CustoFixo from './pages/CustoFixo';
 import CustosVariaveis from './pages/CustosVariaveis';
 import SimuladorImpostos from './pages/SimuladorImpostos';
@@ -37,8 +35,6 @@ export default function App() {
         <Route path="/configuracoes" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/planos" element={<ProtectedRoute><Pricing /></ProtectedRoute>} />
         <Route path="/formacao-preco" element={<ProtectedRoute><FormacaoPreco /></ProtectedRoute>} />
-        <Route path="/mix-preco" element={<ProtectedRoute><MixPreco /></ProtectedRoute>} />
-        <Route path="/mix-preco-lote" element={<ProtectedRoute><MixPrecoLote /></ProtectedRoute>} />
         <Route path="/custos-fixos" element={<ProtectedRoute><CustoFixo /></ProtectedRoute>} />
         <Route path="/custos-variaveis" element={<ProtectedRoute><CustosVariaveis /></ProtectedRoute>} />
         <Route path="/impostos" element={<ProtectedRoute><SimuladorImpostos /></ProtectedRoute>} />
