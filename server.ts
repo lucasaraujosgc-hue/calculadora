@@ -57,15 +57,16 @@ export const PLANS = {
 } as const;
 export type PlanId = keyof typeof PLANS;
 
-async function requireAuth(req: any, res: any, next: any) {
-  const token = req.cookies.admin_token;
-  if (!token) return res.status(401).json({ error: "Unauthorized" });
-  try {
-    jwt.verify(token, JWT_SECRET as string);
+// Admin routes reuse the same user_token/role system as the rest of the app
+// (there is no separate admin login/cookie — a user becomes admin via the
+// `role` column, see /api/register bootstrap logic below).
+async function requireAdmin(req: any, res: any, next: any) {
+  await requireUser(req, res, () => {
+    if (req.currentUser?.role !== "admin") {
+      return res.status(403).json({ error: "Acesso restrito a administradores." });
+    }
     next();
-  } catch (err) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  });
 }
 
 async function requireUser(req: any, res: any, next: any) {
@@ -82,11 +83,11 @@ async function requireUser(req: any, res: any, next: any) {
   }
 }
 
-app.get("/api/admin/courses", requireAuth, async (req, res) => {
+app.get("/api/admin/courses", requireAdmin, async (req, res) => {
   const allCourses = await db.select().from(courses);
   res.json(allCourses);
 });
-app.post("/api/admin/courses", requireAuth, async (req, res) => {
+app.post("/api/admin/courses", requireAdmin, async (req, res) => {
   const newCourse = req.body;
   const inserted = await db.insert(courses).values({
     title: newCourse.courseName || newCourse.title,
@@ -96,7 +97,7 @@ app.post("/api/admin/courses", requireAuth, async (req, res) => {
   }).returning();
   res.json(inserted[0]);
 });
-app.put("/api/admin/courses/:id", requireAuth, async (req, res) => {
+app.put("/api/admin/courses/:id", requireAdmin, async (req, res) => {
   const updated = await db.update(courses)
     .set({
       title: req.body.courseName || req.body.title,
@@ -108,14 +109,44 @@ app.put("/api/admin/courses/:id", requireAuth, async (req, res) => {
   if (updated.length > 0) res.json(updated[0]);
   else res.status(404).json({ error: "Course not found" });
 });
-app.delete("/api/admin/courses/:id", requireAuth, async (req, res) => {
+app.delete("/api/admin/courses/:id", requireAdmin, async (req, res) => {
   await db.delete(courses).where(eq(courses.id, req.params.id as any));
   res.json({ success: true });
 });
 
-app.get("/api/admin/leads", requireAuth, async (req, res) => {
+app.get("/api/admin/leads", requireAdmin, async (req, res) => {
   const allLeads = await db.select().from(leads);
   res.json(allLeads);
+});
+
+// --- User management (used by AdminPanel.tsx) ---
+app.get("/api/admin/users", requireAdmin, async (req, res) => {
+  const allUsers = await db.select().from(users);
+  res.json(allUsers.map(u => ({
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    plan: u.planId,
+    createdAt: u.createdAt
+  })));
+});
+app.post("/api/admin/users/:email/plan", requireAdmin, async (req, res) => {
+  const planId = req.body.planId;
+  if (!planId || !(planId in PLANS) && planId !== "") {
+    return res.status(400).json({ error: "Plano inválido." });
+  }
+  const updated = await db.update(users)
+    .set({ planId: planId || "free" })
+    .where(eq(users.email, req.params.email)).returning();
+  if (updated.length > 0) res.json({ success: true, user: updated[0] });
+  else res.status(404).json({ error: "Usuário não encontrado." });
+});
+app.delete("/api/admin/users/:email", requireAdmin, async (req, res) => {
+  const target = await db.select().from(users).where(eq(users.email, req.params.email));
+  if (target.length === 0) return res.status(404).json({ error: "Usuário não encontrado." });
+  if (target[0].role === "admin") return res.status(403).json({ error: "Não é possível excluir um administrador." });
+  await db.delete(users).where(eq(users.email, req.params.email));
+  res.json({ success: true });
 });
 
 app.get("/api/courses", async (req, res) => {
@@ -145,16 +176,37 @@ app.post("/api/register", authLimiter, async (req, res) => {
     const existing = await db.select().from(users).where(eq(users.email, parsed.email));
     if (existing.length > 0) return res.status(400).json({ error: "E-mail já cadastrado" });
     const passwordHash = await bcrypt.hash(parsed.password, 10);
+    const isBootstrapAdmin = !!process.env.ADMIN_EMAIL && parsed.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase();
     const newUser = await db.insert(users).values({
       name: parsed.name,
       email: parsed.email,
       passwordHash,
-      role: 'user',
-      planId: 'free',
+      role: isBootstrapAdmin ? 'admin' : 'user',
+      planId: isBootstrapAdmin ? 'ilimitado' : 'free',
     }).returning();
-    const token = jwt.sign({ email: newUser[0].email, role: 'user' }, JWT_SECRET as string, { expiresIn: "7d" });
+
+    // A tabela `users` não tem coluna de telefone; guardamos o contato como lead
+    // para não perder o dado informado no cadastro.
+    try {
+      await db.insert(leads).values({ name: parsed.name, email: parsed.email, phone: parsed.phone });
+    } catch (leadErr) {
+      console.error("Erro ao registrar lead de cadastro:", leadErr);
+    }
+
+    const token = jwt.sign({ email: newUser[0].email, role: newUser[0].role }, JWT_SECRET as string, { expiresIn: "7d" });
     res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
-    res.json({ success: true, email: newUser[0].email, plan: newUser[0].planId });
+    const plan = PLANS[newUser[0].planId as PlanId] || PLANS.basico;
+    res.json({
+      success: true,
+      user: {
+        name: newUser[0].name,
+        email: newUser[0].email,
+        phone: parsed.phone,
+        role: newUser[0].role,
+        plan: newUser[0].planId,
+        productLimit: plan.productLimit,
+      },
+    });
   } catch (err: any) {
     res.status(400).json({ error: "Dados inválidos", details: err.errors });
   }
@@ -170,7 +222,18 @@ app.post("/api/login", authLimiter, async (req, res) => {
     if (!match) return res.status(401).json({ error: "Credenciais inválidas." });
     const token = jwt.sign({ email: user.email, role: user.role }, JWT_SECRET as string, { expiresIn: "7d" });
     res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
-    res.json({ success: true, email: user.email, plan: user.planId });
+    const plan = PLANS[user.planId as PlanId] || PLANS.basico;
+    res.json({
+      success: true,
+      user: {
+        name: user.name,
+        email: user.email,
+        phone: "",
+        role: user.role,
+        plan: user.planId,
+        productLimit: plan.productLimit,
+      },
+    });
   } catch (err: any) {
     res.status(400).json({ error: "Dados inválidos", details: err.errors });
   }
@@ -179,6 +242,59 @@ app.post("/api/login", authLimiter, async (req, res) => {
 app.post("/api/logout", (req, res) => {
   res.clearCookie("user_token");
   res.json({ success: true });
+});
+
+const forgotPasswordSchema = z.object({ email: z.string().email() });
+const resetPasswordSchema = z.object({ token: z.string().min(1), password: z.string().min(6) });
+
+app.post("/api/forgot-password", authLimiter, async (req, res) => {
+  try {
+    const { email } = forgotPasswordSchema.parse(req.body);
+    const userList = await db.select().from(users).where(eq(users.email, email));
+    // Sempre responde com sucesso genérico, mesmo se o e-mail não existir,
+    // para não permitir enumeração de usuários cadastrados.
+    if (userList.length > 0) {
+      const user = userList[0];
+      const rawToken = crypto.randomBytes(32).toString("hex");
+      const resetTokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      const resetTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+      await db.update(users).set({ resetTokenHash, resetTokenExpiresAt }).where(eq(users.id, user.id));
+
+      const appUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+      const resetLink = `${appUrl}/reset-password?token=${rawToken}`;
+      try {
+        await transporter.sendMail({
+          from: `${process.env.SMTP_FROM_NAME || "Vírgula Contábil"} <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+          to: user.email,
+          subject: "Redefinição de senha",
+          html: `<p>Olá, ${user.name}.</p><p>Clique no link abaixo para redefinir sua senha. Ele expira em 1 hora.</p><p><a href="${resetLink}">${resetLink}</a></p><p>Se você não solicitou isso, ignore este e-mail.</p>`,
+        });
+      } catch (mailErr) {
+        console.error("Erro ao enviar e-mail de redefinição de senha:", mailErr);
+      }
+    }
+    res.json({ success: true, message: "Se o e-mail existir em nossa base, enviaremos um link de redefinição." });
+  } catch (err: any) {
+    res.status(400).json({ error: "Dados inválidos", details: err.errors });
+  }
+});
+
+app.post("/api/reset-password", authLimiter, async (req, res) => {
+  try {
+    const { token, password } = resetPasswordSchema.parse(req.body);
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const userList = await db.select().from(users).where(eq(users.resetTokenHash, tokenHash));
+    if (userList.length === 0) return res.status(400).json({ error: "Token inválido ou expirado" });
+    const user = userList[0];
+    if (!user.resetTokenExpiresAt || user.resetTokenExpiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ error: "Token inválido ou expirado" });
+    }
+    const passwordHash = await bcrypt.hash(password, 10);
+    await db.update(users).set({ passwordHash, resetTokenHash: null, resetTokenExpiresAt: null }).where(eq(users.id, user.id));
+    res.json({ success: true, message: "Senha redefinida com sucesso." });
+  } catch (err: any) {
+    res.status(400).json({ error: "Dados inválidos", details: err.errors });
+  }
 });
 
 app.get("/api/me", requireUser, (req: any, res) => {

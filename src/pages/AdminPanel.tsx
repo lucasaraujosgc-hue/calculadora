@@ -78,8 +78,7 @@ export default function AdminPanel() {
                 <tr>
                   <th className="px-4 py-3">Nome</th>
                   <th className="px-4 py-3">E-mail</th>
-                  <th className="px-4 py-3">Telefone</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Cargo</th>
                   <th className="px-4 py-3">Plano</th>
                   <th className="px-4 py-3">Data de Cadastro</th>
                   <th className="px-4 py-3 text-right">Ações</th>
@@ -90,15 +89,14 @@ export default function AdminPanel() {
                   <tr key={i} className="hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-medium text-foreground">{u.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{u.phone || '-'}</td>
                     <td className="px-4 py-3">
-                      {u.isActivated ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium">
-                          <CheckCircle2 className="w-3 h-3" /> Ativo
+                      {u.role === 'admin' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-medium">
+                          <CheckCircle2 className="w-3 h-3" /> Admin
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
-                          <XCircle className="w-3 h-3" /> Pendente
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+                          <XCircle className="w-3 h-3" /> Usuário
                         </span>
                       )}
                     </td>
@@ -136,7 +134,7 @@ export default function AdminPanel() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {new Date(u.timestamp).toLocaleDateString('pt-BR')}
+                      {new Date(u.createdAt).toLocaleDateString('pt-BR')}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {u.role !== 'admin' && (

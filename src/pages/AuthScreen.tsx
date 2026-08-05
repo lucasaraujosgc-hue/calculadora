@@ -45,21 +45,23 @@ export default function AuthScreen() {
     }
     
     if (isRegistering) {
-       if (!name || !email || !phone) return alert('Preencha todos os campos');
-       
+       if (!name || !email || !phone || !password) return alert('Preencha todos os campos');
+       if (password.length < 6) return alert('A senha deve ter pelo menos 6 caracteres');
+
        setIsLoading(true);
        try {
          const res = await fetch('/api/register', {
            method: 'POST',
            headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ name, email, phone }),
+           body: JSON.stringify({ name, email, phone, password }),
          });
          
          const data = await res.json();
          if (!res.ok) throw new Error(data.error || 'Erro ao registrar');
          
-         alert(data.message || 'Verifique seu e-mail para ativar a conta e criar sua senha.');
-         setIsRegistering(false); // go back to login view
+         login(data.user, rememberMe);
+         const origin = (location.state as any)?.from?.pathname || '/';
+         navigate(origin);
        } catch (err: any) {
          alert(err.message || 'Houve um erro ao realizar o cadastro.');
          console.error(err);
@@ -160,6 +162,20 @@ export default function AuthScreen() {
                   placeholder="seu@email.com"
                 />
               </div>
+
+              {isRegistering && (
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">Senha</label>
+                  <input 
+                    type="password" 
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    placeholder="Mínimo 6 caracteres"
+                    minLength={6}
+                  />
+                </div>
+              )}
               
               {!isRegistering && (
                 <div>

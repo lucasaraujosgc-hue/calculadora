@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { app } from '../server.ts';
 import { db } from '../src/db/index.js';
 
@@ -34,10 +35,16 @@ describe('Security Rules & Isolation', () => {
     const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
     db.select.mockReturnValue({ from: mockFrom });
 
+    const payload = JSON.stringify({ id: 'evt_123', type: 'order.paid' });
+    const secret = process.env.PAGARME_WEBHOOK_SECRET || '';
+    const hash = crypto.createHmac('sha1', secret).update(payload).digest('hex');
+    const signature = `sha1=${hash}`;
+
     const res = await request(app)
       .post('/api/webhooks/pagarme')
-      .set('x-pagarme-webhook-signature', 'fake_sig')
-      .send({ id: 'evt_123', type: 'order.paid' });
+      .set('x-pagarme-webhook-signature', signature)
+      .send(payload)
+      .set('Content-Type', 'application/json');
       
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ success: true, message: "Evento já processado." });
