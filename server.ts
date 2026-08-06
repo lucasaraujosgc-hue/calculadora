@@ -167,8 +167,8 @@ app.post("/api/leads", async (req, res) => {
   res.json(newLead[0]);
 });
 
-const registerSchema = z.object({ name: z.string().min(2), email: z.string().email(), phone: z.string().min(8), password: z.string().min(6) });
-const loginSchema = z.object({ email: z.string().email(), password: z.string() });
+const registerSchema = z.object({ name: z.string().min(2, "Nome muito curto"), email: z.string().email("E-mail inválido"), phone: z.string().min(8, "Telefone muito curto"), password: z.string().min(6, "Senha muito curta") });
+const loginSchema = z.object({ email: z.string().email("E-mail inválido"), password: z.string().min(1, "Senha obrigatória") });
 
 app.post("/api/register", authLimiter, async (req, res) => {
   try {
@@ -177,38 +177,44 @@ app.post("/api/register", authLimiter, async (req, res) => {
     if (existing.length > 0) return res.status(400).json({ error: "E-mail já cadastrado" });
     const passwordHash = await bcrypt.hash(parsed.password, 10);
     const isBootstrapAdmin = !!process.env.ADMIN_EMAIL && parsed.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase();
+    
+    const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
     const newUser = await db.insert(users).values({
       name: parsed.name,
       email: parsed.email,
       passwordHash,
       role: isBootstrapAdmin ? 'admin' : 'user',
       planId: isBootstrapAdmin ? 'ilimitado' : 'free',
+      verificationToken,
+      isVerified: false
     }).returning();
 
-    // A tabela `users` não tem coluna de telefone; guardamos o contato como lead
-    // para não perder o dado informado no cadastro.
     try {
       await db.insert(leads).values({ name: parsed.name, email: parsed.email, phone: parsed.phone });
     } catch (leadErr) {
       console.error("Erro ao registrar lead de cadastro:", leadErr);
     }
 
-    const token = jwt.sign({ email: newUser[0].email, role: newUser[0].role }, JWT_SECRET as string, { expiresIn: "7d" });
-    res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
-    const plan = PLANS[newUser[0].planId as PlanId] || PLANS.basico;
+    try {
+      await transporter.sendMail({
+        from: `${process.env.SMTP_FROM_NAME || "Vírgula Contábil"} <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+        to: parsed.email,
+        subject: "Código de Verificação",
+        html: `<p>Olá, ${parsed.name}.</p><p>Seu código de verificação é: <strong>${verificationToken}</strong></p>`,
+      });
+    } catch (mailErr) {
+      console.error("Erro ao enviar e-mail de verificação:", mailErr);
+    }
+
     res.json({
       success: true,
-      user: {
-        name: newUser[0].name,
-        email: newUser[0].email,
-        phone: parsed.phone,
-        role: newUser[0].role,
-        plan: newUser[0].planId,
-        productLimit: plan.productLimit,
-      },
+      requireVerification: true,
+      email: parsed.email
     });
+
   } catch (err: any) {
-    res.status(400).json({ error: "Dados inválidos", details: err.errors });
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : "Dados inválidos";
+    res.status(400).json({ error: msgs, details: err.errors });
   }
 });
 
@@ -220,6 +226,11 @@ app.post("/api/login", authLimiter, async (req, res) => {
     const user = userList[0];
     const match = await bcrypt.compare(parsed.password, user.passwordHash);
     if (!match) return res.status(401).json({ error: "Credenciais inválidas." });
+    
+    if (!user.isVerified) {
+      return res.status(403).json({ error: "Conta não verificada", requireVerification: true, email: user.email });
+    }
+
     const token = jwt.sign({ email: user.email, role: user.role }, JWT_SECRET as string, { expiresIn: "7d" });
     res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
     const plan = PLANS[user.planId as PlanId] || PLANS.basico;
@@ -235,7 +246,8 @@ app.post("/api/login", authLimiter, async (req, res) => {
       },
     });
   } catch (err: any) {
-    res.status(400).json({ error: "Dados inválidos", details: err.errors });
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : "Dados inválidos";
+    res.status(400).json({ error: msgs, details: err.errors });
   }
 });
 
@@ -246,6 +258,42 @@ app.post("/api/logout", (req, res) => {
 
 const forgotPasswordSchema = z.object({ email: z.string().email() });
 const resetPasswordSchema = z.object({ token: z.string().min(1), password: z.string().min(6) });
+
+
+app.post("/api/verify-code", authLimiter, async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ error: "E-mail e código são obrigatórios." });
+    
+    const userList = await db.select().from(users).where(eq(users.email, email));
+    if (userList.length === 0) return res.status(400).json({ error: "Usuário não encontrado." });
+    
+    const user = userList[0];
+    if (user.isVerified) return res.json({ success: true, message: "Conta já verificada." });
+    
+    if (user.verificationToken !== code) return res.status(400).json({ error: "Código inválido." });
+    
+    await db.update(users).set({ isVerified: true, verificationToken: null }).where(eq(users.id, user.id));
+    
+    const token = jwt.sign({ email: user.email, role: user.role }, JWT_SECRET as string, { expiresIn: "7d" });
+    res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
+    
+    const plan = PLANS[user.planId as keyof typeof PLANS] || PLANS.basico;
+    res.json({
+      success: true,
+      user: {
+        name: user.name,
+        email: user.email,
+        phone: "",
+        role: user.role,
+        plan: user.planId,
+        productLimit: plan.productLimit,
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Erro interno", details: err.message });
+  }
+});
 
 app.post("/api/forgot-password", authLimiter, async (req, res) => {
   try {
@@ -275,7 +323,8 @@ app.post("/api/forgot-password", authLimiter, async (req, res) => {
     }
     res.json({ success: true, message: "Se o e-mail existir em nossa base, enviaremos um link de redefinição." });
   } catch (err: any) {
-    res.status(400).json({ error: "Dados inválidos", details: err.errors });
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : "Dados inválidos";
+    res.status(400).json({ error: msgs, details: err.errors });
   }
 });
 
@@ -293,7 +342,8 @@ app.post("/api/reset-password", authLimiter, async (req, res) => {
     await db.update(users).set({ passwordHash, resetTokenHash: null, resetTokenExpiresAt: null }).where(eq(users.id, user.id));
     res.json({ success: true, message: "Senha redefinida com sucesso." });
   } catch (err: any) {
-    res.status(400).json({ error: "Dados inválidos", details: err.errors });
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : "Dados inválidos";
+    res.status(400).json({ error: msgs, details: err.errors });
   }
 });
 

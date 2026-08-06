@@ -14,6 +14,8 @@ export const users = pgTable('users', {
   planId: text('plan_id').default('free').notNull(),
   resetTokenHash: text('reset_token_hash'),
   resetTokenExpiresAt: timestamp('reset_token_expires_at'),
+  verificationToken: text('verification_token'),
+  isVerified: boolean('is_verified').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

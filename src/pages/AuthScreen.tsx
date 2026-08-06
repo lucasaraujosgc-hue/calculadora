@@ -9,6 +9,9 @@ export default function AuthScreen() {
   const location = useLocation();
   const [isRegistering, setIsRegistering] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -20,6 +23,28 @@ export default function AuthScreen() {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isVerifying) {
+       if (!email || !verificationCode) return alert('Preencha o e-mail e o código');
+       setIsLoading(true);
+       try {
+         const res = await fetch('/api/verify-code', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ email, code: verificationCode }),
+         });
+         const data = await res.json();
+         if (!res.ok) throw new Error(data.error || 'Erro ao verificar código');
+         
+         login(data.user, rememberMe);
+         const origin = (location.state as any)?.from?.pathname || '/';
+         navigate(origin);
+       } catch (err: any) {
+         alert(err.message || 'Erro ao verificar código.');
+       } finally {
+         setIsLoading(false);
+       }
+       return;
+    }
     if (isForgotPassword) {
        if (!email) return alert('Preencha seu e-mail');
        setIsLoading(true);
@@ -45,8 +70,9 @@ export default function AuthScreen() {
     }
     
     if (isRegistering) {
-       if (!name || !email || !phone || !password) return alert('Preencha todos os campos');
+       if (!name || !email || !phone || !password || !confirmPassword) return alert('Preencha todos os campos');
        if (password.length < 6) return alert('A senha deve ter pelo menos 6 caracteres');
+       if (password !== confirmPassword) return alert('As senhas não coincidem');
 
        setIsLoading(true);
        try {
@@ -59,9 +85,15 @@ export default function AuthScreen() {
          const data = await res.json();
          if (!res.ok) throw new Error(data.error || 'Erro ao registrar');
          
-         login(data.user, rememberMe);
-         const origin = (location.state as any)?.from?.pathname || '/';
-         navigate(origin);
+         if (data.requireVerification) {
+           setIsRegistering(false);
+           setIsVerifying(true);
+           alert('Um código foi enviado para o seu e-mail. Por favor, insira-o para continuar.');
+         } else {
+           login(data.user, rememberMe);
+           const origin = (location.state as any)?.from?.pathname || '/';
+           navigate(origin);
+         }
        } catch (err: any) {
          alert(err.message || 'Houve um erro ao realizar o cadastro.');
          console.error(err);
@@ -80,7 +112,13 @@ export default function AuthScreen() {
          });
          
          const data = await res.json();
-         if (!res.ok) throw new Error(data.error || 'Erro ao fazer login');
+         if (!res.ok) {
+           if (data.requireVerification) {
+             setIsVerifying(true);
+             throw new Error('Você precisa verificar seu e-mail primeiro. Um código foi enviado no cadastro.');
+           }
+           throw new Error(data.error || 'Erro ao fazer login');
+         }
          
          login(data.user, rememberMe);
          const origin = (location.state as any)?.from?.pathname || '/';
@@ -107,7 +145,7 @@ export default function AuthScreen() {
         </div>
         
         <h2 className="text-2xl font-serif text-center text-primary mb-6">
-          {isForgotPassword ? 'Recuperar Senha' : (isRegistering ? 'Criar Conta' : 'Acessar Conta')}
+          {isVerifying ? 'Verificar E-mail' : isForgotPassword ? 'Recuperar Senha' : (isRegistering ? 'Criar Conta' : 'Acessar Conta')}
         </h2>
         
         <form onSubmit={handleAuth} className="space-y-4">
@@ -217,7 +255,7 @@ export default function AuthScreen() {
           )}
           
           <button type="submit" disabled={isLoading} className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 transition-colors disabled:opacity-50">
-            {isLoading ? 'Aguarde...' : (isForgotPassword ? 'Enviar Link' : (isRegistering ? 'Cadastrar' : 'Entrar'))}
+            {isLoading ? 'Aguarde...' : (isVerifying ? 'Verificar Conta' : isForgotPassword ? 'Enviar Link' : (isRegistering ? 'Cadastrar' : 'Entrar'))}
           </button>
         </form>
         
