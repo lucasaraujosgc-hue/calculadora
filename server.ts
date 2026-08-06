@@ -24,6 +24,7 @@ if (!JWT_SECRET) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = 3000;
 
 const authLimiter = rateLimit({
@@ -707,8 +708,10 @@ async function setupVite() {
               description = course.description;
             }
           }
-        } catch (dbErr) {
-          console.error("Failed to query courses for meta tags:", dbErr);
+        } catch (dbErr: any) {
+          if (dbErr.code !== '42P01') {
+            console.error("Failed to query courses for meta tags:", dbErr);
+          }
         }
       }
 
