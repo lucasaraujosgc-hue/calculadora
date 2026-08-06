@@ -579,13 +579,17 @@ async function setupVite() {
 
       if (urlParts.length >= 2 && urlParts[1] && urlParts[1] !== "admin") {
         const slug = urlParts[1];
-        const courseList = await db.select().from(courses);
-        const course = courseList.find((c: any) => c.slug === slug);
-        if (course) {
-          title = `${course.title} - Vírgula Contábil`;
-          if (course.description) {
-            description = course.description;
+        try {
+          const courseList = await db.select().from(courses);
+          const course = courseList.find((c: any) => c.slug === slug);
+          if (course) {
+            title = `${course.title} - Vírgula Contábil`;
+            if (course.description) {
+              description = course.description;
+            }
           }
+        } catch (dbErr) {
+          console.error("Failed to query courses for meta tags:", dbErr);
         }
       }
 
