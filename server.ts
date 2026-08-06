@@ -486,16 +486,10 @@ app.post("/api/products/import", requireUser, requireExcelImport, upload.single(
 
 app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
   const { planId } = req.body || {};
-  const PLANS: Record<string, { name: string, priceCents: number }> = {
-    basico: { name: "Básico", priceCents: 949 },
-    intermediario: { name: "Intermediário", priceCents: 2749 },
-    ilimitado: { name: "Ilimitado", priceCents: 5990 },
-  };
-
   if (!planId || !(planId in PLANS)) {
     return res.status(400).json({ error: "Plano inválido." });
   }
-  const plan = PLANS[planId];
+  const plan = PLANS[planId as keyof typeof PLANS];
   if (req.currentUser.planId === planId) {
     return res.status(400).json({ error: "Você já possui este plano." });
   }
@@ -523,7 +517,7 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
       max_paid_sessions: 1,
       payment_settings: { 
         accepted_payment_methods: ["credit_card", "pix"],
-        pix: { expires_in: 3600 }
+        pix_settings: { expires_in: 3600 }
       },
       cart_settings: { items: [{ name: `Plano ${plan.name} - Calculadora Vírgula Contábil`, amount: plan.priceCents, default_quantity: 1 }] },
       checkout_settings: {
@@ -554,8 +548,11 @@ app.post("/api/webhooks/pagarme", async (req: any, res) => {
       const payload = req.rawBody || JSON.stringify(req.body);
       const parts = (signature as string).split("=");
       const providedSignature = parts.length > 1 ? parts[1] : parts[0];
-      const expectedSignature = crypto.createHmac("sha1", secret).update(payload).digest("hex");
-      if (providedSignature !== expectedSignature) return res.status(401).json({ error: "Assinatura inválida" });
+      const expectedSignatureSha1 = crypto.createHmac("sha1", secret).update(payload).digest("hex");
+      const expectedSignatureSha256 = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+      if (providedSignature !== expectedSignatureSha1 && providedSignature !== expectedSignatureSha256) {
+        return res.status(401).json({ error: "Assinatura inválida" });
+      }
     }
 
     const event = req.body;
@@ -587,7 +584,14 @@ app.post("/api/webhooks/pagarme", async (req: any, res) => {
              try {
                 const userList = await db.select().from(users).where(eq(users.id, payment.userId as any));
                 if (userList.length > 0) {
-                   console.log(`✅ EMAIL ENVIADO (simulação) para vendas@virgulacontabil.com.br: O cliente ${userList[0].email} assinou o plano Ilimitado. Agende a call de consultoria.`);
+                   const salesEmail = process.env.SALES_TEAM_EMAIL || 'vendas@virgulacontabil.com.br';
+                   await transporter.sendMail({
+                     from: `${process.env.SMTP_FROM_NAME || "Vírgula Contábil"} <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+                     to: salesEmail,
+                     subject: "Novo Plano Ilimitado - Agendar Consultoria",
+                     html: `<p>O cliente <strong>${userList[0].name}</strong> (${userList[0].email}) acabou de assinar o plano Ilimitado.</p><p>Por favor, entre em contato para agendar a call de consultoria.</p>`
+                   });
+                   console.log(`✅ E-mail real enviado para ${salesEmail} sobre o novo assinante Ilimitado.`);
                 }
              } catch (err) {}
           }
