@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Trash2, Lock, Upload } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Link } from 'react-router-dom';
+import { formatCurrency } from '../utils/format';
 
 export default function CustosVariaveis() {
   const { user, produtos, setProdutos, saveProduto, removeProduto, isGuest } = useAppContext();
@@ -246,7 +247,7 @@ export default function CustosVariaveis() {
               {produtos.map((p) => (
                 <tr key={p.id} className="hover:bg-muted/30 transition-colors">
                   <td className="px-6 py-4 font-medium text-foreground">{p.nome}</td>
-                  <td className="px-6 py-4 font-medium text-red-600">R$ {p.cmv.toFixed(2)}</td>
+                  <td className="px-6 py-4 font-medium text-red-600">{formatCurrency(p.cmv)}</td>
                   <td className="px-6 py-4 text-foreground">{p.vendasProjetadas || 0} un</td>
                   <td className="px-6 py-4">
                     <button onClick={() => handleRemove(p.id)} className="text-red-500 hover:text-red-700">

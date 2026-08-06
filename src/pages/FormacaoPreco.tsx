@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { useAppContext } from '../context/AppContext';
+import { formatCurrency } from '../utils/format';
 
 export default function FormacaoPreco() {
   const { produtos, custosFixos, saveProduto } = useAppContext();
@@ -229,12 +230,12 @@ export default function FormacaoPreco() {
                 <p className={`text-sm font-medium mb-1 ${modoPrecificacao === 'margem' ? 'opacity-80' : 'text-muted-foreground'}`}>
                   {modoPrecificacao === 'margem' ? 'Preço de Venda Ideal' : 'Preço de Venda Simulado'}
                 </p>
-                <h3 className={`text-4xl font-bold ${modoPrecificacao === 'preco' ? 'text-foreground' : ''}`}>R$ {precoFinal.toFixed(2)}</h3>
+                <h3 className={`text-4xl font-bold ${modoPrecificacao === 'preco' ? 'text-foreground' : ''}`}>{formatCurrency(precoFinal)}</h3>
              </div>
              
              <div className="bg-card border border-border p-5 rounded-xl shadow-sm">
                 <p className="text-sm font-medium text-muted-foreground mb-1">Margem de Contribuição</p>
-                <h3 className={`text-3xl font-semibold ${margemContribuicao > 0 ? 'text-emerald-600' : 'text-red-600'}`}>R$ {margemContribuicao.toFixed(2)}</h3>
+                <h3 className={`text-3xl font-semibold ${margemContribuicao > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(margemContribuicao)}</h3>
                 <p className="text-xs text-muted-foreground mt-1">Valor que sobra para pagar Custos Fixos e gerar Lucro.</p>
              </div>
 
@@ -243,7 +244,7 @@ export default function FormacaoPreco() {
                   <div>
                     <p className="text-sm font-medium text-muted-foreground mb-1">Lucro Líquido (por unidade)</p>
                     <h3 className={`text-3xl font-semibold ${valorMargem >= 0 ? 'text-primary' : 'text-red-600'}`}>
-                      R$ {valorMargem.toFixed(2)}
+                      {formatCurrency(valorMargem)}
                     </h3>
                   </div>
                   <div className="text-right">
@@ -274,7 +275,7 @@ export default function FormacaoPreco() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
                <div>
                   <p className="text-sm font-medium text-muted-foreground mb-1">Total de Custos Fixos</p>
-                  <p className="text-2xl font-bold text-foreground">R$ {custoFixoTotal.toFixed(2)}</p>
+                  <p className="text-2xl font-bold text-foreground">{formatCurrency(custoFixoTotal)}</p>
                   <p className="text-xs text-muted-foreground mt-1">Soma de todas as despesas da operação.</p>
                </div>
                <div>
@@ -308,11 +309,11 @@ export default function FormacaoPreco() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                   <XAxis dataKey="unidades" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} tickFormatter={(v) => `${v} un`} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dx={-10} tickFormatter={(value) => `R$${(value/1000).toFixed(0)}k`} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dx={-10} tickFormatter={(value) => `${formatCurrency((value/1000))}k`} />
                   <Tooltip 
                     contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                     itemStyle={{ fontSize: '14px', fontWeight: 500 }}
-                    formatter={(value: number) => `R$ ${value.toFixed(2)}`}
+                    formatter={(value: number) => `${formatCurrency(value)}`}
                     labelFormatter={(label) => `${label} unidades`}
                   />
                   <Area type="monotone" dataKey="receita" name="Receita" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorReceita)" />
@@ -340,7 +341,7 @@ export default function FormacaoPreco() {
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => `R$ ${value.toFixed(2)}`} />
+                  <Tooltip formatter={(value: number) => `${formatCurrency(value)}`} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -352,7 +353,7 @@ export default function FormacaoPreco() {
                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
                     <span className="text-sm font-medium text-foreground">{item.name}</span>
                   </div>
-                  <span className="text-sm font-bold text-foreground">R$ {item.value.toFixed(2)}</span>
+                  <span className="text-sm font-bold text-foreground">{formatCurrency(item.value)}</span>
                 </div>
               ))}
             </div>

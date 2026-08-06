@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Plus, Trash2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import { formatCurrency } from '../utils/format';
 
 export default function CustoFixo() {
   const { custosFixos, saveCustoFixo, removeCustoFixo } = useAppContext();
@@ -50,7 +51,7 @@ export default function CustoFixo() {
               <div key={custo.id} className="flex items-center justify-between p-3 border border-border rounded-lg bg-background">
                 <span className="font-medium text-foreground">{custo.nome}</span>
                 <div className="flex items-center gap-4">
-                  <span className="text-primary font-medium">R$ {custo.valor.toFixed(2)}</span>
+                  <span className="text-primary font-medium">{formatCurrency(custo.valor)}</span>
                   <button onClick={() => handleRemove(custo.id)} className="text-red-500 hover:text-red-700 transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -84,7 +85,7 @@ export default function CustoFixo() {
 
           <div className="mt-6 p-4 bg-muted/50 rounded-lg border border-border flex justify-between items-center">
             <span className="font-medium text-foreground">Total Custo Fixo:</span>
-            <span className="text-xl font-bold text-primary">R$ {custoFixoTotal.toFixed(2)}</span>
+            <span className="text-xl font-bold text-primary">{formatCurrency(custoFixoTotal)}</span>
           </div>
         </div>
 
@@ -107,7 +108,7 @@ export default function CustoFixo() {
 
             <div className="bg-primary border border-primary/20 p-6 rounded-xl text-primary-foreground shadow-sm mb-6">
               <p className="text-sm font-medium opacity-80 mb-2">Cada unidade absorve do custo fixo:</p>
-              <h3 className="text-5xl font-bold">R$ {custoUnitario.toFixed(2)}</h3>
+              <h3 className="text-5xl font-bold">{formatCurrency(custoUnitario)}</h3>
             </div>
             
             <h3 className="text-lg font-medium text-primary mb-2 mt-8">Simulação: Efeito do Volume</h3>
@@ -119,7 +120,7 @@ export default function CustoFixo() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
                   <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} tickFormatter={v => `R$${v}`} />
-                  <Tooltip formatter={(v: number) => `R$ ${v.toFixed(2)}`} cursor={{fill: 'transparent'}} />
+                  <Tooltip formatter={(v: number) => `${formatCurrency(v)}`} cursor={{fill: 'transparent'}} />
                   <Bar dataKey="custoUnitario" fill="#6366f1" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>

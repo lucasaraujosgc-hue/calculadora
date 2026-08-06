@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend } from 'recharts';
 import { Info } from 'lucide-react';
+import { formatCurrency } from '../utils/format';
 
 // ---------------------------------------------------------------------------
 // Tabelas oficiais do Simples Nacional (Anexos I a V — LC 123/2006)
@@ -554,7 +555,7 @@ export default function SimuladorImpostos() {
               onChange={e => setFaturamentoMensal(Number(e.target.value))}
               className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
             />
-            <p className="text-xs text-muted-foreground mt-1">Faturamento Anual (RBT12): R$ {faturamentoAnual.toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Faturamento Anual (RBT12): {formatCurrency(faturamentoAnual)}</p>
           </div>
 
           <div>
@@ -587,7 +588,7 @@ export default function SimuladorImpostos() {
                       className={`py-2 px-3 rounded-md border text-sm font-medium text-left flex items-center justify-between ${atividadeMei === k ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground border-border hover:bg-muted'}`}
                     >
                       <span>{MEI_LABELS[k]}</span>
-                      <span className="font-semibold">R$ {MEI_VALORES[k].toFixed(2)}</span>
+                      <span className="font-semibold">{formatCurrency(MEI_VALORES[k])}</span>
                     </button>
                   ))}
                 </div>
@@ -654,9 +655,9 @@ export default function SimuladorImpostos() {
                     </div>
                   ))}
                   <div className={`text-xs rounded-md p-2 ${Math.abs(diferencaRateio) < 0.01 ? 'bg-muted/50 text-muted-foreground' : 'bg-amber-100 text-amber-700'}`}>
-                    Soma informada: R$ {rateioResult.somaValores.toFixed(2)} de R$ {faturamentoMensal.toFixed(2)} do faturamento mensal
+                    Soma informada: {formatCurrency(rateioResult.somaValores)} de {formatCurrency(faturamentoMensal)} do faturamento mensal
                     {Math.abs(diferencaRateio) >= 0.01 && (
-                      <> — {diferencaRateio > 0 ? `faltam R$ ${diferencaRateio.toFixed(2)}` : `passou R$ ${Math.abs(diferencaRateio).toFixed(2)}`}.</>
+                      <> — {diferencaRateio > 0 ? `faltam ${formatCurrency(diferencaRateio)}` : `passou ${formatCurrency(Math.abs(diferencaRateio))}`}.</>
                     )}
                   </div>
                 </div>
@@ -786,7 +787,7 @@ export default function SimuladorImpostos() {
                 </p>
                 {folhaPresumido > 0 && (
                   <p className="text-xs font-medium text-primary mt-1">
-                    Patronal + RAT estimado: R$ {encargoPatronalPresumido.toFixed(2)}/mês
+                    Patronal + RAT estimado: {formatCurrency(encargoPatronalPresumido)}/mês
                   </p>
                 )}
               </div>
@@ -820,7 +821,7 @@ export default function SimuladorImpostos() {
                   {estadoCompra && estadoEmpresa && (
                     <div className="p-3 bg-muted/50 rounded-md border border-border text-xs text-muted-foreground space-y-1">
                       <div className="flex justify-between"><span>Alíquota de ICMS aplicada ({infoAliquotaCompra.tipo})</span><span className="font-medium text-foreground">{infoAliquotaCompra.aliquota.toFixed(1)}%</span></div>
-                      <div className="flex justify-between"><span>Crédito de ICMS sobre a compra</span><span className="font-medium text-foreground">R$ {icmsCreditoCompras.toFixed(2)}</span></div>
+                      <div className="flex justify-between"><span>Crédito de ICMS sobre a compra</span><span className="font-medium text-foreground">{formatCurrency(icmsCreditoCompras)}</span></div>
                       <p className="pt-1">
                         {estadoCompra === estadoEmpresa
                           ? 'Compra dentro do mesmo Estado da empresa — aplicada a alíquota interna.'
@@ -884,10 +885,10 @@ export default function SimuladorImpostos() {
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-primary border border-primary/20 p-5 rounded-xl text-primary-foreground shadow-sm col-span-2">
               <p className="text-sm font-medium opacity-80 mb-1">Imposto Mensal Estimado ({regime === 'mei' ? 'MEI' : regime === 'simples' ? 'Simples Nacional' : regime === 'presumido' ? 'Lucro Presumido' : 'Manual'})</p>
-              <h3 className="text-4xl font-bold">R$ {custoMensal.toFixed(2)}</h3>
+              <h3 className="text-4xl font-bold">{formatCurrency(custoMensal)}</h3>
               <p className="text-sm opacity-80 mt-2">Alíquota efetiva de {impostoPercentual.toFixed(2)}% sobre o faturamento.</p>
               {regime === 'presumido' && folhaPresumido > 0 && (
-                <p className="text-xs opacity-70 mt-1">Inclui R$ {encargoPatronalPresumido.toFixed(2)} de Patronal + RAT sobre a folha.</p>
+                <p className="text-xs opacity-70 mt-1">Inclui {formatCurrency(encargoPatronalPresumido)} de Patronal + RAT sobre a folha.</p>
               )}
             </div>
           </div>
@@ -896,7 +897,7 @@ export default function SimuladorImpostos() {
             <div className="bg-card border border-border p-6 rounded-xl shadow-sm space-y-2">
               <h3 className="text-lg font-medium text-primary mb-2">Detalhamento — MEI</h3>
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Atividade</span><span className="font-medium">{MEI_LABELS[atividadeMei]}</span></div>
-              <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Valor fixo do DAS-MEI (2026)</span><span className="font-semibold text-primary">R$ {MEI_VALORES[atividadeMei].toFixed(2)}</span></div>
+              <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Valor fixo do DAS-MEI (2026)</span><span className="font-semibold text-primary">{formatCurrency(MEI_VALORES[atividadeMei])}</span></div>
               <p className="text-xs text-muted-foreground pt-1">O DAS-MEI é um valor fixo mensal, independente do faturamento (respeitado o limite anual de R$ {LIMITE_ANUAL_MEI.toLocaleString('pt-BR')}), por isso a alíquota efetiva cai quanto maior o faturamento.</p>
             </div>
           )}
@@ -911,15 +912,15 @@ export default function SimuladorImpostos() {
               )}
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Anexo utilizado</span><span className="font-medium">{simplesResult.anexoUsado}</span></div>
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Alíquota nominal da faixa</span><span className="font-medium">{simplesResult.nominal.toFixed(2)}%</span></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Parcela a deduzir</span><span className="font-medium">R$ {simplesResult.pd.toFixed(2)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Parcela a deduzir</span><span className="font-medium">{formatCurrency(simplesResult.pd)}</span></div>
               <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Alíquota efetiva (nominal)</span><span className="font-semibold text-primary">{simplesResult.aliquotaEfetiva.toFixed(2)}%</span></div>
 
               {temRedutorSimplesAtivo && (
                 <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-md space-y-1">
                   <p className="text-xs font-medium text-emerald-800">Com os redutores informados:</p>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">DAS sem redutor</span><span className="font-medium">R$ {redutorSimples.dasSemReducao.toFixed(2)}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">DAS com redutor</span><span className="font-semibold text-emerald-700">R$ {redutorSimples.dasComReducao.toFixed(2)}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Economia no mês</span><span className="font-medium text-emerald-700">R$ {redutorSimples.economia.toFixed(2)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">DAS sem redutor</span><span className="font-medium">{formatCurrency(redutorSimples.dasSemReducao)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">DAS com redutor</span><span className="font-semibold text-emerald-700">{formatCurrency(redutorSimples.dasComReducao)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Economia no mês</span><span className="font-medium text-emerald-700">{formatCurrency(redutorSimples.economia)}</span></div>
                   <p className="text-xs text-muted-foreground pt-1">
                     Percentuais de repartição do {simplesResult.anexoUsado} nesta faixa: ICMS/ISS {redutorSimples.reparticao.issIcms.toFixed(2)}%, PIS {redutorSimples.reparticao.pis.toFixed(2)}%, COFINS {redutorSimples.reparticao.cofins.toFixed(2)}%.
                   </p>
@@ -946,7 +947,7 @@ export default function SimuladorImpostos() {
             <div className="bg-card border border-border p-6 rounded-xl shadow-sm space-y-3">
               <h3 className="text-lg font-medium text-primary mb-2">Detalhamento — Rateio entre Anexos</h3>
               <p className="text-xs text-muted-foreground">
-                O RBT12 total da empresa (R$ {faturamentoAnual.toFixed(2)}) define a faixa em cada anexo — só a alíquota efetiva de cada um muda. Os redutores de ICMS-ST/Isento e PIS/COFINS especial ficam disponíveis apenas no modo de anexo único.
+                O RBT12 total da empresa ({formatCurrency(faturamentoAnual)}) define a faixa em cada anexo — só a alíquota efetiva de cada um muda. Os redutores de ICMS-ST/Isento e PIS/COFINS especial ficam disponíveis apenas no modo de anexo único.
               </p>
               {rateioResult.linhas.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-2">Informe o valor de faturamento de pelo menos um anexo.</p>
@@ -957,11 +958,11 @@ export default function SimuladorImpostos() {
                   <div key={l.anexo} className="p-3 bg-muted/50 rounded-lg border border-border space-y-1">
                     <div className="flex justify-between text-sm font-medium text-foreground">
                       <span>{l.anexo}{l.anexoUsado !== l.anexo ? ` → tributado como ${l.anexoUsado}` : ''}</span>
-                      <span>R$ {l.valor.toFixed(2)}</span>
+                      <span>{formatCurrency(l.valor)}</span>
                     </div>
                     <div className="flex justify-between text-xs text-muted-foreground">
                       <span>Alíquota efetiva {l.aliquotaEfetiva.toFixed(2)}%</span>
-                      <span>Imposto: R$ {l.imposto.toFixed(2)}</span>
+                      <span>Imposto: {formatCurrency(l.imposto)}</span>
                     </div>
                     {l.isentoIcmsElegivel && (
                       <p className="text-xs text-emerald-700 bg-emerald-100 rounded-md p-2 mt-1">
@@ -981,7 +982,7 @@ export default function SimuladorImpostos() {
               })}
               <div className="flex justify-between text-sm border-t border-border pt-2 mt-2">
                 <span className="text-muted-foreground">Total do DAS no mês</span>
-                <span className="font-semibold text-primary">R$ {rateioResult.totalImposto.toFixed(2)}</span>
+                <span className="font-semibold text-primary">{formatCurrency(rateioResult.totalImposto)}</span>
               </div>
               {rateioResult.linhas.some(l => l.isentoIcmsElegivel) && (
                 <p className="text-xs text-muted-foreground mt-1">
@@ -994,32 +995,32 @@ export default function SimuladorImpostos() {
           {regime === 'presumido' && (
             <div className="bg-card border border-border p-6 rounded-xl shadow-sm space-y-2">
               <h3 className="text-lg font-medium text-primary mb-2">Detalhamento — Lucro Presumido (mensal)</h3>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">IRPJ (15% + adicional)</span><span className="font-medium">R$ {presumidoResult.irpj.toFixed(2)}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">CSLL (9%)</span><span className="font-medium">R$ {presumidoResult.csll.toFixed(2)}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">PIS (0,65%)</span><span className="font-medium">R$ {presumidoResult.pis.toFixed(2)}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">COFINS (3%)</span><span className="font-medium">R$ {presumidoResult.cofins.toFixed(2)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">IRPJ (15% + adicional)</span><span className="font-medium">{formatCurrency(presumidoResult.irpj)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">CSLL (9%)</span><span className="font-medium">{formatCurrency(presumidoResult.csll)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">PIS (0,65%)</span><span className="font-medium">{formatCurrency(presumidoResult.pis)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">COFINS (3%)</span><span className="font-medium">{formatCurrency(presumidoResult.cofins)}</span></div>
 
               {atividadePresumido === 'comercio' ? (
                 <>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">ICMS débito (sobre venda)</span><span className="font-medium">R$ {presumidoResult.icmsDebito.toFixed(2)}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">(–) Crédito de ICMS sobre compras</span><span className="font-medium">R$ {presumidoResult.icmsCredito.toFixed(2)}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">ICMS líquido a recolher</span><span className="font-semibold">R$ {presumidoResult.issIcms.toFixed(2)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">ICMS débito (sobre venda)</span><span className="font-medium">{formatCurrency(presumidoResult.icmsDebito)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">(–) Crédito de ICMS sobre compras</span><span className="font-medium">{formatCurrency(presumidoResult.icmsCredito)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">ICMS líquido a recolher</span><span className="font-semibold">{formatCurrency(presumidoResult.issIcms)}</span></div>
                   {presumidoResult.saldoCredorIcms > 0 && (
                     <p className="text-xs text-emerald-700 bg-emerald-100 rounded-md p-2 mt-1">
-                      Saldo credor de ICMS de R$ {presumidoResult.saldoCredorIcms.toFixed(2)} — o crédito das compras superou o débito das vendas e pode ser aproveitado nos próximos meses.
+                      Saldo credor de ICMS de {formatCurrency(presumidoResult.saldoCredorIcms)} — o crédito das compras superou o débito das vendas e pode ser aproveitado nos próximos meses.
                     </p>
                   )}
                 </>
               ) : (
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">ISS ({aliquotaIssIcms}%)</span><span className="font-medium">R$ {presumidoResult.issIcms.toFixed(2)}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">ISS ({aliquotaIssIcms}%)</span><span className="font-medium">{formatCurrency(presumidoResult.issIcms)}</span></div>
               )}
 
-              <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Total de tributos</span><span className="font-semibold text-primary">R$ {presumidoResult.total.toFixed(2)}</span></div>
+              <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Total de tributos</span><span className="font-semibold text-primary">{formatCurrency(presumidoResult.total)}</span></div>
 
               {folhaPresumido > 0 && (
                 <>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Patronal + RAT ({ALIQUOTA_PATRONAL_RAT.toFixed(1)}% da folha)</span><span className="font-medium">R$ {encargoPatronalPresumido.toFixed(2)}</span></div>
-                  <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Total geral (tributos + encargos)</span><span className="font-semibold text-primary">R$ {impostoPresumido.toFixed(2)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Patronal + RAT ({ALIQUOTA_PATRONAL_RAT.toFixed(1)}% da folha)</span><span className="font-medium">{formatCurrency(encargoPatronalPresumido)}</span></div>
+                  <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Total geral (tributos + encargos)</span><span className="font-semibold text-primary">{formatCurrency(impostoPresumido)}</span></div>
                 </>
               )}
             </div>
@@ -1037,7 +1038,7 @@ export default function SimuladorImpostos() {
                   <Tooltip
                     formatter={(v: number, name: string, props: any) => {
                       const item = comparacaoRegimes.find(d => d.regime === props.payload.regime);
-                      return [`R$ ${v.toFixed(2)} (${item?.aliquota.toFixed(2)}%)`, 'Imposto Mensal'];
+                      return [`${formatCurrency(v)} (${item?.aliquota.toFixed(2)}%)`, 'Imposto Mensal'];
                     }}
                   />
                   <Bar dataKey="imposto" radius={[0, 4, 4, 0]} barSize={24}>

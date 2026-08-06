@@ -2,6 +2,7 @@ import React from 'react';
 import { Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Percent, Target, Box, FileText, Info } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import { formatCurrency } from '../utils/format';
 
 export default function Dashboard() {
   const { produtos, custosFixos } = useAppContext();
@@ -88,15 +89,15 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { title: 'Receita Estimada Mensal', value: `R$ ${receitaEstimada.toFixed(2)}`, isPositive: receitaEstimada > 0, icon: DollarSign },
-          { title: 'Ponto de Equilíbrio', value: `R$ ${pontoEquilibrio.toFixed(2)}`, isPositive: receitaEstimada >= pontoEquilibrio, icon: Target },
-          { title: 'Lucro Estimado', value: `R$ ${lucroEstimado.toFixed(2)}`, isPositive: lucroEstimado > 0, icon: ShoppingBag },
+          { title: 'Receita Estimada Mensal', value: `${formatCurrency(receitaEstimada)}`, isPositive: receitaEstimada > 0, icon: DollarSign },
+          { title: 'Ponto de Equilíbrio', value: `${formatCurrency(pontoEquilibrio)}`, isPositive: receitaEstimada >= pontoEquilibrio, icon: Target },
+          { title: 'Lucro Estimado', value: `${formatCurrency(lucroEstimado)}`, isPositive: lucroEstimado > 0, icon: ShoppingBag },
           { title: 'Margem Global (Média)', value: `${mediaMargem.toFixed(1)}%`, isPositive: mediaMargem > 20, icon: Percent },
           
-          { title: 'Custo Fixo Mensal', value: `R$ ${custoFixoTotal.toFixed(2)}`, isPositive: false, icon: TrendingUp },
-          { title: 'Custo Variável Total', value: `R$ ${custosVariaveisTotais.toFixed(2)}`, isPositive: false, icon: Box },
-          { title: 'Impostos Gerais', value: `R$ ${impostoValorTotal.toFixed(2)} (${impostoPorcentagem.toFixed(1)}%)`, isPositive: false, icon: FileText },
-          { title: 'Taxas e Comissões', value: `R$ ${taxasComissoesValorTotal.toFixed(2)}`, isPositive: false, icon: Percent },
+          { title: 'Custo Fixo Mensal', value: `${formatCurrency(custoFixoTotal)}`, isPositive: false, icon: TrendingUp },
+          { title: 'Custo Variável Total', value: `${formatCurrency(custosVariaveisTotais)}`, isPositive: false, icon: Box },
+          { title: 'Impostos Gerais', value: `${formatCurrency(impostoValorTotal)} (${impostoPorcentagem.toFixed(1)}%)`, isPositive: false, icon: FileText },
+          { title: 'Taxas e Comissões', value: `${formatCurrency(taxasComissoesValorTotal)}`, isPositive: false, icon: Percent },
         ].map((stat, i) => (
           <div key={i} className="bg-card border border-border p-5 rounded-xl shadow-sm">
             <div className="flex items-center justify-between mb-4">
@@ -189,7 +190,7 @@ export default function Dashboard() {
                   ))}
                 </Pie>
                 <RechartsTooltip 
-                  formatter={(value: number) => `R$ ${value.toFixed(2)}`}
+                  formatter={(value: number) => `${formatCurrency(value)}`}
                   contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 />
                 <Legend verticalAlign="bottom" height={36} />
@@ -206,7 +207,7 @@ export default function Dashboard() {
                   <div className="flex items-center justify-between mb-1">
                      <span className="font-medium text-red-700 text-sm">Operação em Prejuízo</span>
                   </div>
-                  <p className="text-xs text-red-600">Seu lucro global estimado é de R$ {lucroEstimado.toFixed(2)}. Revise seus custos fixos ou ajuste a margem dos produtos.</p>
+                  <p className="text-xs text-red-600">Seu lucro global estimado é de {formatCurrency(lucroEstimado)}. Revise seus custos fixos ou ajuste a margem dos produtos.</p>
                </div>
              )}
              

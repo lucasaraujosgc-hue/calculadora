@@ -573,7 +573,7 @@ async function setupVite() {
       }
       
       const urlParts = req.originalUrl.split("?")[0].split("/");
-      let title = "Vírgula Contábil - Calculadora";
+      let title = "Calculadora | Vírgula Contábil";
       let description = "Calculadoras de precificação e simulação financeira para clientes Vírgula Contábil.";
       const ogImage = "https://www.virgulacontabil.com.br/wp-content/uploads/2026/04/favicon.png";
 
