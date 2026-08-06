@@ -33,7 +33,8 @@ describe('Security Rules & Isolation', () => {
   it('webhook should be idempotent', async () => {
     const mockWhere = vi.fn().mockResolvedValue([{ id: 1, eventId: 'evt_123', status: 'processed' }]);
     const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
-    db.select.mockReturnValue({ from: mockFrom });
+    const mockedDb = vi.mocked(db, true);
+    mockedDb.select.mockReturnValue({ from: mockFrom } as any);
 
     const payload = JSON.stringify({ id: 'evt_123', type: 'order.paid' });
     const secret = process.env.PAGARME_WEBHOOK_SECRET || '';
@@ -48,7 +49,7 @@ describe('Security Rules & Isolation', () => {
       
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ success: true, message: "Evento já processado." });
-    expect(db.insert).not.toHaveBeenCalled();
+    expect(mockedDb.insert).not.toHaveBeenCalled();
   });
 
   it('should isolate user data by user_id', async () => {
@@ -56,21 +57,30 @@ describe('Security Rules & Isolation', () => {
     const email = 'test@example.com';
     const token = jwt.sign({ email }, process.env.JWT_SECRET || 'super_secret_key_123');
     
+    const mockedDb = vi.mocked(db, true);
+    
     // First db.select() is for requireUser
     // Second db.select() is for /api/products
     const mockWhere = vi.fn()
       .mockResolvedValueOnce([{ id: userId, email }])
-      .mockResolvedValueOnce([{ id: 1, name: 'Produto 1', userId }]);
+      .mockResolvedValueOnce([{
+        id: 1, name: 'Produto 1', costPrice: 10, salePrice: 25,
+        projectedSales: 50, isSample: false, userId
+      }]);
       
     const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
-    db.select.mockReturnValue({ from: mockFrom });
+    mockedDb.select.mockReturnValue({ from: mockFrom } as any);
     
     const res = await request(app)
       .get('/api/products')
       .set('Cookie', [`user_token=${token}`]);
       
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([{ id: 1, name: 'Produto 1', userId }]);
-    expect(db.select).toHaveBeenCalled();
+    expect(res.body).toEqual([{
+      id: 1, nome: 'Produto 1', cmv: 10, precoVenda: 25,
+      vendasProjetadas: 50, isSample: false
+    }]);
+    expect(res.body[0]).not.toHaveProperty('userId');
+    expect(mockedDb.select).toHaveBeenCalled();
   });
 });
