@@ -75,6 +75,24 @@ async function requireUser(req: any, res: any, next: any) {
   if (!token) return res.status(401).json({ error: "Não autenticado" });
   try {
     const payload: any = jwt.verify(token, JWT_SECRET as string);
+    
+    // Suporte ao admin hardcoded no .env que não está no banco
+    if (
+      process.env.ADMIN_EMAIL &&
+      payload.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase() &&
+      payload.role === 'admin'
+    ) {
+      req.currentUser = {
+        id: "admin-system",
+        name: "Admin",
+        email: payload.email,
+        role: "admin",
+        planId: "ilimitado",
+        isVerified: true
+      };
+      return next();
+    }
+
     const userList = await db.select().from(users).where(eq(users.email, payload.email));
     if (userList.length === 0) return res.status(401).json({ error: "Usuário não encontrado" });
     req.currentUser = userList[0];
@@ -221,6 +239,7 @@ app.post("/api/register", authLimiter, async (req, res) => {
 });
 
 app.post("/api/login", authLimiter, async (req, res) => {
+  console.log("LOGIN REQUEST RECEIVED", req.body);
   try {
     const { password } = req.body;
     const email = req.body.email?.trim().toLowerCase();
@@ -252,7 +271,7 @@ app.post("/api/login", authLimiter, async (req, res) => {
       });
       return res.json({ 
         success: true, 
-        user: { name: 'Admin', email: process.env.ADMIN_EMAIL, phone: '', role: 'admin', isVerified: true, plan: 'ilimitado', productLimit: Infinity }
+        user: { id: 'admin-system', name: 'Admin', email: process.env.ADMIN_EMAIL, phone: '', role: 'admin', isVerified: true, plan: 'ilimitado', productLimit: Infinity }
       });
     }
 

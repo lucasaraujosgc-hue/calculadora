@@ -16,11 +16,17 @@ export default function AdminPanel() {
     fetch('/api/admin/users')
       .then(res => res.json())
       .then(data => {
-        setUsers(data);
+        if (Array.isArray(data)) {
+          setUsers(data);
+        } else {
+          setUsers([]);
+          console.error("Failed to load users:", data);
+        }
         setLoading(false);
       })
       .catch(err => {
         console.error(err);
+        setUsers([]);
         setLoading(false);
       });
   };
