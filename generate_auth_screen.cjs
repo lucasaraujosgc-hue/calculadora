@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+const fs = require('fs');
+const content = `import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Logo from '../components/Logo';
@@ -361,3 +362,5 @@ export default function AuthScreen() {
     </div>
   );
 }
+`;
+fs.writeFileSync('src/pages/AuthScreen.tsx', content);
