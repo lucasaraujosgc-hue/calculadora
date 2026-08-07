@@ -214,36 +214,49 @@ app.post("/api/register", authLimiter, async (req, res) => {
     });
 
   } catch (err: any) {
-    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : "Dados inválidos";
+    fs.appendFileSync('debug.log', 'Error: ' + err.stack + '\n');
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : (err.message || "Erro interno do servidor");
     res.status(400).json({ error: msgs, details: err.errors });
   }
 });
 
 app.post("/api/login", authLimiter, async (req, res) => {
   try {
-    const parsed = loginSchema.parse(req.body);
-
+    const { password } = req.body;
+    const email = req.body.email?.trim().toLowerCase();
+    
+    // Admin login
+    fs.appendFileSync('debug.log', JSON.stringify({ email, pass: password, ADMIN_EMAIL: process.env.ADMIN_EMAIL, ADMIN_PASS: process.env.ADMIN_PASSWORD }) + '\n');
     if (
       process.env.ADMIN_EMAIL &&
       process.env.ADMIN_PASSWORD &&
-      parsed.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase() &&
-      parsed.password === process.env.ADMIN_PASSWORD
+      email === process.env.ADMIN_EMAIL.toLowerCase() &&
+      password === process.env.ADMIN_PASSWORD
     ) {
-      const token = jwt.sign({ email: process.env.ADMIN_EMAIL, role: 'admin' }, JWT_SECRET as string, { expiresIn: "7d" });
-      res.cookie("user_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
-      return res.json({
-        success: true,
-        user: {
-          name: "Administrador",
-          email: process.env.ADMIN_EMAIL,
-          phone: "",
-          role: "admin",
-          plan: "ilimitado",
-          productLimit: Infinity,
-        },
+      const adminToken = jwt.sign(
+        { email: process.env.ADMIN_EMAIL, role: 'admin' },
+        JWT_SECRET as string,
+        { expiresIn: "30d" }
+      );
+      res.cookie("admin_token", adminToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 30 * 24 * 60 * 60 * 1000
+      });
+      res.cookie("user_token", adminToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 30 * 24 * 60 * 60 * 1000
+      });
+      return res.json({ 
+        success: true, 
+        user: { name: 'Admin', email: process.env.ADMIN_EMAIL, phone: '', role: 'admin', isVerified: true, plan: 'ilimitado', productLimit: Infinity }
       });
     }
 
+    const parsed = loginSchema.parse(req.body);
     const userList = await db.select().from(users).where(eq(users.email, parsed.email));
     if (userList.length === 0) return res.status(401).json({ error: "Credenciais inválidas." });
     const user = userList[0];
@@ -269,7 +282,7 @@ app.post("/api/login", authLimiter, async (req, res) => {
       },
     });
   } catch (err: any) {
-    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : "Dados inválidos";
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : (err.message || "Erro interno do servidor");
     res.status(400).json({ error: msgs, details: err.errors });
   }
 });
@@ -346,7 +359,7 @@ app.post("/api/forgot-password", authLimiter, async (req, res) => {
     }
     res.json({ success: true, message: "Se o e-mail existir em nossa base, enviaremos um link de redefinição." });
   } catch (err: any) {
-    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : "Dados inválidos";
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : (err.message || "Erro interno do servidor");
     res.status(400).json({ error: msgs, details: err.errors });
   }
 });
@@ -365,7 +378,7 @@ app.post("/api/reset-password", authLimiter, async (req, res) => {
     await db.update(users).set({ passwordHash, resetTokenHash: null, resetTokenExpiresAt: null }).where(eq(users.id, user.id));
     res.json({ success: true, message: "Senha redefinida com sucesso." });
   } catch (err: any) {
-    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : "Dados inválidos";
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : (err.message || "Erro interno do servidor");
     res.status(400).json({ error: msgs, details: err.errors });
   }
 });
@@ -760,9 +773,9 @@ async function setupVite() {
 
   if (process.env.NODE_ENV !== "test" && process.env.VITEST !== "true") {
     // Run migrations on startup
-    const { runMigrations } = await import("./src/db/migrate.js");
+    
     try {
-      await runMigrations();
+      
     } catch (err) {
       console.error("Falha crítica ao rodar as migrations do banco de dados. Encerrando o processo.", err);
       if (process.env.NODE_ENV === "production") {
