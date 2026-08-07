@@ -23,7 +23,7 @@ export default function Pricing() {
         setLoadingPlan(null);
       }
     } catch (err) {
-      alert('Erro de conexão. Tente novamente.');
+      console.error(err); alert('Erro de conexão. Tente novamente.');
       setLoadingPlan(null);
     }
   };

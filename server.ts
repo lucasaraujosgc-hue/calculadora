@@ -219,7 +219,16 @@ app.post("/api/register", authLimiter, async (req, res) => {
         from: `${process.env.SMTP_FROM_NAME || "Vírgula Contábil"} <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
         to: parsed.email,
         subject: "Código de Verificação",
-        html: `<p>Olá, ${parsed.name}.</p><p>Seu código de verificação é: <strong>${verificationToken}</strong></p>`,
+        html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 32px; background-color: #ffffff;">
+          <h2 style="color: #2e3440; font-size: 24px; margin-bottom: 24px; text-align: center;">Código de Verificação</h2>
+          <p style="color: #4c566a; font-size: 16px; line-height: 1.5; margin-bottom: 24px;">Olá, <strong>${parsed.name}</strong>.</p>
+          <p style="color: #4c566a; font-size: 16px; line-height: 1.5; margin-bottom: 32px;">Para concluir seu cadastro na Calculadora Vírgula Contábil, utilize o código de verificação abaixo:</p>
+          <div style="background-color: #f3f4f6; border-radius: 8px; padding: 24px; text-align: center; margin-bottom: 32px;">
+            <span style="font-size: 36px; font-weight: bold; color: #1a56db; letter-spacing: 8px;">${verificationToken}</span>
+          </div>
+          <p style="color: #4c566a; font-size: 14px; line-height: 1.5; text-align: center; margin-bottom: 0;">Se você não solicitou este código, por favor, ignore este e-mail.</p>
+        </div>`,
       });
     } catch (mailErr) {
       console.error("Erro ao enviar e-mail de verificação:", mailErr);
@@ -590,7 +599,8 @@ app.post("/api/products/import", requireUser, requireExcelImport, upload.single(
 });
 
 app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
-  const { planId } = req.body || {};
+  try {
+    const { planId } = req.body || {};
   if (!planId || !(planId in PLANS)) {
     return res.status(400).json({ error: "Plano inválido." });
   }
@@ -619,7 +629,8 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
     body: JSON.stringify({
       type: "order",
       order_code: orderCode,
-      max_paid_sessions: 1,
+      max_orders: 1,
+      name: `Plano ${plan.name}`,
       payment_settings: { 
         accepted_payment_methods: ["credit_card", "pix"],
         pix_settings: { expires_in: 3600 }
@@ -631,13 +642,27 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
     })
   });
 
-  const linkData = await linkResponse.json();
+  let linkData: any = {};
+  try {
+    const text = await linkResponse.text();
+    if (text) {
+      linkData = JSON.parse(text);
+    }
+  } catch (e) {
+    console.error("Erro ao parsear Pagar.me response", e);
+  }
+  
   if (!linkResponse.ok || !linkData.url) {
+    console.error("Pagar.me Error:", linkResponse.status, linkData);
     await db.update(payments).set({ status: "error" }).where(eq(payments.id, payment.id as any));
     return res.status(502).json({ error: "Não foi possível iniciar o pagamento. Tente novamente." });
   }
   await db.update(payments).set({ paymentLinkId: linkData.id }).where(eq(payments.id, payment.id as any));
   res.json({ url: linkData.url });
+  } catch (error: any) {
+    console.error("Erro no checkout:", error);
+    res.status(500).json({ error: "Erro interno no servidor de pagamentos." });
+  }
 });
 
 app.post("/api/webhooks/pagarme", async (req: any, res) => {
