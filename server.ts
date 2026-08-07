@@ -139,11 +139,19 @@ app.get("/api/admin/leads", requireAdmin, async (req, res) => {
 });
 
 // --- User management (used by AdminPanel.tsx) ---
+import { desc } from "drizzle-orm";
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
-  const allUsers = await db.select().from(users);
+  const allUsers = await db.select().from(users).orderBy(desc(users.createdAt)).limit(200);
+  const allLeads = await db.select().from(leads);
+  const phoneMap = new Map();
+  allLeads.forEach(l => {
+    if (l.email && l.phone) phoneMap.set(l.email.toLowerCase(), l.phone);
+  });
+  
   res.json(allUsers.map(u => ({
     name: u.name,
     email: u.email,
+    phone: phoneMap.get(u.email.toLowerCase()) || '',
     role: u.role,
     plan: u.planId,
     createdAt: u.createdAt
@@ -151,7 +159,7 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
 });
 app.post("/api/admin/users/:email/plan", requireAdmin, async (req, res) => {
   const planId = req.body.planId;
-  if (!planId || !(planId in PLANS) && planId !== "") {
+  if (planId !== "" && planId !== "free" && !(planId in PLANS)) {
     return res.status(400).json({ error: "Plano inválido." });
   }
   const updated = await db.update(users)
@@ -379,7 +387,16 @@ app.post("/api/forgot-password", authLimiter, async (req, res) => {
           from: `${process.env.SMTP_FROM_NAME || "Vírgula Contábil"} <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
           to: user.email,
           subject: "Redefinição de senha",
-          html: `<p>Olá, ${user.name}.</p><p>Clique no link abaixo para redefinir sua senha. Ele expira em 1 hora.</p><p><a href="${resetLink}">${resetLink}</a></p><p>Se você não solicitou isso, ignore este e-mail.</p>`,
+          html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 32px; background-color: #ffffff;">
+          <h2 style="color: #2e3440; font-size: 24px; margin-bottom: 24px; text-align: center;">Redefinição de Senha</h2>
+          <p style="color: #4c566a; font-size: 16px; line-height: 1.5; margin-bottom: 24px;">Olá, <strong>${user.name}</strong>.</p>
+          <p style="color: #4c566a; font-size: 16px; line-height: 1.5; margin-bottom: 32px;">Você solicitou a redefinição da sua senha. Clique no botão abaixo para criar uma nova senha (o link expira em 1 hora):</p>
+          <div style="text-align: center; margin-bottom: 32px;">
+            <a href="${resetLink}" style="display: inline-block; background-color: #1a56db; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Redefinir Minha Senha</a>
+          </div>
+          <p style="color: #4c566a; font-size: 14px; line-height: 1.5; text-align: center; margin-bottom: 0;">Se você não solicitou isso, por favor, ignore este e-mail. Nenhuma alteração será feita na sua conta.</p>
+        </div>`,
         });
       } catch (mailErr) {
         console.error("Erro ao enviar e-mail de redefinição de senha:", mailErr);

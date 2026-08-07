@@ -85,13 +85,26 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </div>
       <div className={`p-4 border-t border-border shrink-0 ${isCollapsed ? 'flex justify-center' : ''}`}>
         {user ? (
-          <div 
-            onClick={() => { logout(); setIsMobileMenuOpen(false); }}
-            title={isCollapsed ? "Sair" : undefined}
+          <div className="flex flex-col w-full">
+            {!isCollapsed && (
+              <div className="px-3 mb-4 flex items-center justify-between">
+                <div className="flex flex-col overflow-hidden">
+                  <span className="text-sm font-semibold truncate text-foreground">{user.name}</span>
+                  <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+                </div>
+                <div title={`Plano Atual: ${user.plan === 'ilimitado' ? 'Ilimitado' : user.plan === 'intermediario' ? 'Intermediário' : user.plan === 'basico' ? 'Básico' : 'Gratuito'}`} className="ml-2 flex shrink-0 items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary">
+                  <Star className={`w-4 h-4 ${user.plan === 'ilimitado' || user.plan === 'intermediario' ? 'fill-current' : ''}`} />
+                </div>
+              </div>
+            )}
+            <div 
+              onClick={() => { logout(); setIsMobileMenuOpen(false); }}
+              title={isCollapsed ? "Sair" : undefined}
             className={`flex items-center ${isCollapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2'} text-sm font-medium text-muted-foreground hover:text-foreground cursor-pointer rounded-md hover:bg-muted transition-colors`}
           >
              <LogOut className="h-5 w-5 shrink-0" />
              {!isCollapsed && <span>Sair</span>}
+          </div>
           </div>
         ) : (
           <div 

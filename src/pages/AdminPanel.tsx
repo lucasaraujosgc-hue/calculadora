@@ -84,6 +84,7 @@ export default function AdminPanel() {
                 <tr>
                   <th className="px-4 py-3">Nome</th>
                   <th className="px-4 py-3">E-mail</th>
+                  <th className="px-4 py-3">Telefone</th>
                   <th className="px-4 py-3">Cargo</th>
                   <th className="px-4 py-3">Plano</th>
                   <th className="px-4 py-3">Data de Cadastro</th>
@@ -95,6 +96,7 @@ export default function AdminPanel() {
                   <tr key={i} className="hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-medium text-foreground">{u.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{u.phone || '-'}</td>
                     <td className="px-4 py-3">
                       {u.role === 'admin' ? (
                         <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-medium">
@@ -157,7 +159,7 @@ export default function AdminPanel() {
                 ))}
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                    <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                       Nenhum usuário encontrado.
                     </td>
                   </tr>
