@@ -633,7 +633,11 @@ app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
       name: `Plano ${plan.name}`,
       payment_settings: { 
         accepted_payment_methods: ["credit_card", "pix"],
-        pix_settings: { expires_in: 3600 }
+        pix_settings: { expires_in: 3600 },
+        credit_card_settings: {
+          operation_type: "auth_and_capture",
+          installments: [{ number: 1, total: plan.priceCents }]
+        }
       },
       cart_settings: { items: [{ name: `Plano ${plan.name} - Calculadora Vírgula Contábil`, amount: plan.priceCents, default_quantity: 1 }] },
       checkout_settings: {
