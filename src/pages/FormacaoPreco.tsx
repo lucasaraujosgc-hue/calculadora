@@ -88,7 +88,7 @@ export default function FormacaoPreco() {
   const valorComissao = precoFinal * (comissao / 100);
   const valorMargem = precoFinal * (margemReal / 100);
   
-  const margemContribuicao = precoFinal - custo - valorImposto - valorTaxa - valorComissao - (precoFinal * (margemReal / 100)); 
+  const margemContribuicao = precoFinal - custo - valorImposto - valorTaxa - valorComissao; 
   
   const isValidMargem = margemContribuicao > 0;
   const peUnidades = isValidMargem ? (custoFixoTotal / margemContribuicao) : Infinity;

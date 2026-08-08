@@ -181,7 +181,7 @@ export default function MixPrecoLote() {
     const valorTaxa = preco * (taxaCartao / 100);
     const valorComissao = preco * (comissao / 100);
     const valorMargem = preco * (margemReal / 100);
-    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao - valorMargem;
+    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao;
 
     const isValidMargem = margemContribuicao > 0;
     const peUnidades = isValidMargem ? (valorRateadoCF / margemContribuicao) : Infinity;
