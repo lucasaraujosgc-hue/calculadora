@@ -59,7 +59,7 @@ export default function Dashboard() {
     taxasComissoesValorTotal += valorTaxasCom * vendas;
     lucroLiquidoTotal += valorLucro * vendas;
     
-    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom - valorLucro;
+    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom;
     
     margemContribuicaoTotal += margemContribuicao * vendas;
   });
