@@ -8,6 +8,7 @@ export interface PricingParams {
   salePrice: number;
   projectedSales?: number;
   fixedCosts?: number; // Total de custos fixos da empresa
+  unitFixedCost?: number; // Custo fixo unitário (opcional)
   taxesPercent?: number; // Ex: 0.15 para 15%
   feesPercent?: number; // Ex: 0.05 para 5%
   comissionPercent?: number; // Ex: 0.02 para 2%
@@ -103,6 +104,7 @@ export function calculateOperatingResult(
  * Preço = Custo / (1 - (Impostos + Taxas + Comissões + Margem Desejada))
  */
 export function calculateSellingPrice(
+  unitFixedCost: number,
   costPrice: number,
   taxesPercent: number,
   feesPercent: number,
@@ -112,5 +114,5 @@ export function calculateSellingPrice(
   const totalDeductions = taxesPercent + feesPercent + comissionPercent + desiredMarginPercent;
   if (totalDeductions >= 1) return 0; // Inválido, as deduções consomem 100% ou mais do preço
   
-  return costPrice / (1 - totalDeductions);
+  return (costPrice + unitFixedCost) / (1 - totalDeductions);
 }

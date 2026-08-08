@@ -249,20 +249,17 @@ app.post("/api/register", authLimiter, async (req, res) => {
     });
 
   } catch (err: any) {
-    fs.appendFileSync('debug.log', 'Error: ' + err.stack + '\n');
     const msgs = err.errors ? err.errors.map((e: any) => e.message).join(', ') : (err.message || "Erro interno do servidor");
     res.status(400).json({ error: msgs, details: err.errors });
   }
 });
 
 app.post("/api/login", authLimiter, async (req, res) => {
-  console.log("LOGIN REQUEST RECEIVED", req.body);
   try {
     const { password } = req.body;
     const email = req.body.email?.trim().toLowerCase();
     
     // Admin login
-    fs.appendFileSync('debug.log', JSON.stringify({ email, pass: password, ADMIN_EMAIL: process.env.ADMIN_EMAIL, ADMIN_PASS: process.env.ADMIN_PASSWORD }) + '\n');
     if (
       process.env.ADMIN_EMAIL &&
       process.env.ADMIN_PASSWORD &&

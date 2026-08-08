@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
+import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 
 export default function MixPreco() {
@@ -58,7 +59,7 @@ export default function MixPreco() {
     const valorImposto = preco * (imposto / 100);
     const valorTaxa = preco * (taxaCartao / 100);
     const valorComissao = preco * (comissao / 100);
-    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao;
+    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao - (preco * (margem / 100));
 
     receitaTotal += preco * vendas;
     margemTotal += margemContribuicao * vendas;
@@ -183,16 +184,14 @@ export default function MixPreco() {
             const lucroReais = precoFinal - custoTot - descontosVariaveis;
             margemReal = precoFinal > 0 ? (lucroReais / precoFinal) * 100 : 0;
           } else {
-            const totalPerc = despesasVariaveisPerc + margem;
-            const divisor = (100 - totalPerc) / 100;
-            precoFinal = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
+            precoFinal = calculateSellingPrice(p.cmv, custoFixoUnitario, imposto/100, taxaCartao/100, comissao/100, margem/100);
           }
           
           const valorImposto = precoFinal * (imposto / 100);
           const valorTaxa = precoFinal * (taxaCartao / 100);
           const valorComissao = precoFinal * (comissao / 100);
           const valorMargem = precoFinal * (margemReal / 100);
-          const margemContribuicao = precoFinal - p.cmv - valorImposto - valorTaxa - valorComissao;
+          const margemContribuicao = precoFinal - p.cmv - valorImposto - valorTaxa - valorComissao - valorMargem;
           
           // Ponto de equilíbrio específico para este produto com base no SEU rateio
           const isValidMargem = margemContribuicao > 0;

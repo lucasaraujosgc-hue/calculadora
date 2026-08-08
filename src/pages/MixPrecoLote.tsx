@@ -20,6 +20,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
+import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 
 type SortKey =
@@ -173,16 +174,14 @@ export default function MixPrecoLote() {
       const lucroReais = preco - custoTot - descontosVariaveis;
       margemReal = preco > 0 ? (lucroReais / preco) * 100 : 0;
     } else {
-      const totalPerc = despesasVariaveisPerc + margem;
-      const divisor = (100 - totalPerc) / 100;
-      preco = divisor > 0 ? ((p.cmv + custoFixoUnitario) / divisor) : 0;
+      preco = calculateSellingPrice(p.cmv, custoFixoUnitario, imposto/100, taxaCartao/100, comissao/100, margem/100);
     }
 
     const valorImposto = preco * (imposto / 100);
     const valorTaxa = preco * (taxaCartao / 100);
     const valorComissao = preco * (comissao / 100);
     const valorMargem = preco * (margemReal / 100);
-    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao;
+    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao - valorMargem;
 
     const isValidMargem = margemContribuicao > 0;
     const peUnidades = isValidMargem ? (valorRateadoCF / margemContribuicao) : Infinity;

@@ -3,7 +3,8 @@ import { calculateSellingPrice, calculateMarkup, calculateContributionMargin, ca
 
 describe('Pricing Engine', () => {
   it('should calculate selling price correctly', () => {
-    expect(calculateSellingPrice(100, 20)).toBe(125);
+    // 100 / (1 - 0.20) = 125
+    expect(calculateSellingPrice(100, 0, 0, 0, 0, 0.20)).toBe(125);
   });
   
   it('should calculate markup correctly', () => {
@@ -11,10 +12,10 @@ describe('Pricing Engine', () => {
   });
   
   it('should calculate contribution margin correctly', () => {
-    expect(calculateContributionMargin(150, 100)).toBe(50);
+    expect(calculateContributionMargin({ salePrice: 150, costPrice: 100 })).toBe(50);
   });
   
   it('should calculate break even point correctly', () => {
-    expect(calculateBreakEven(1000, 50)).toBe(20);
+    expect(calculateBreakEven({ salePrice: 150, costPrice: 100, fixedCosts: 1000 })).toBe(20);
   });
 });

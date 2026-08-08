@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { useAppContext } from '../context/AppContext';
+import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 
 export default function FormacaoPreco() {
@@ -69,9 +70,7 @@ export default function FormacaoPreco() {
 
   const despesasVariaveisPerc = imposto + taxaCartao + comissao;
   const totalPerc = despesasVariaveisPerc + margem;
-  const divisor = (100 - totalPerc) / 100;
-  
-  const precoIdealCalculado = divisor > 0 ? ((custo + custoFixoUnitario) / divisor) : 0;
+  const precoIdealCalculado = calculateSellingPrice(custo, custoFixoUnitario, imposto/100, taxaCartao/100, comissao/100, margem/100);
   
   let precoFinal = precoIdealCalculado;
   let margemReal = margem;
@@ -89,7 +88,7 @@ export default function FormacaoPreco() {
   const valorComissao = precoFinal * (comissao / 100);
   const valorMargem = precoFinal * (margemReal / 100);
   
-  const margemContribuicao = precoFinal - custo - valorImposto - valorTaxa - valorComissao; 
+  const margemContribuicao = precoFinal - custo - valorImposto - valorTaxa - valorComissao - (precoFinal * (margemReal / 100)); 
   
   const isValidMargem = margemContribuicao > 0;
   const peUnidades = isValidMargem ? (custoFixoTotal / margemContribuicao) : Infinity;

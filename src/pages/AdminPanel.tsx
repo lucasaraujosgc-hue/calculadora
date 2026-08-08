@@ -111,7 +111,7 @@ export default function AdminPanel() {
                     <td className="px-4 py-3">
                       {u.role !== 'admin' ? (
                         <select 
-                          value={u.plan || ''} 
+                          value={u.plan || 'free'} 
                           onChange={async (e) => {
                             const newPlan = e.target.value;
                             try {
@@ -132,7 +132,7 @@ export default function AdminPanel() {
                           }}
                           className="text-sm border border-border rounded-md px-2 py-1 bg-background"
                         >
-                          <option value="">Sem Plano</option>
+                          <option value="free">Sem Plano</option>
                           <option value="basico">Básico</option>
                           <option value="intermediario">Intermediário</option>
                           <option value="ilimitado">Ilimitado</option>

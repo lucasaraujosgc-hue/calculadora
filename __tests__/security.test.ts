@@ -55,7 +55,7 @@ describe('Security Rules & Isolation', () => {
   it('should isolate user data by user_id', async () => {
     const userId = 999;
     const email = 'test@example.com';
-    const token = jwt.sign({ email }, process.env.JWT_SECRET || 'super_secret_key_123');
+    const token = jwt.sign({ email }, process.env.JWT_SECRET || "super-secret-key-change-me");
     
     const mockedDb = vi.mocked(db, true);
     
