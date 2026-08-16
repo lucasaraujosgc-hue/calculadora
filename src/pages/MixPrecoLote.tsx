@@ -94,6 +94,7 @@ const PriceInput = ({
 
 export default function MixPrecoLote() {
   const { produtos, custosFixos, setProdutos, syncProdutos } = useAppContext();
+  const validProdutos = useMemo(() => produtos.filter(p => p.cmv > 0), [produtos]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('todos');
@@ -135,7 +136,7 @@ export default function MixPrecoLote() {
     setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
   };
 
-  const totalRateio = produtos.reduce((acc, p) => acc + (p.percentualRateio || 0), 0);
+  const totalRateio = validProdutos.reduce((acc, p) => acc + (p.percentualRateio || 0), 0);
   const rateioPendente = 100 - totalRateio;
   const valorPendente = (rateioPendente / 100) * custoFixoTotal;
 
@@ -151,7 +152,7 @@ export default function MixPrecoLote() {
     { name: 'Lucro Líquido', value: 0 },
   ];
 
-  const processedProdutos = produtos.map(p => {
+  const processedProdutos = validProdutos.map(p => {
     const imposto = p.imposto || 0;
     const taxaCartao = p.taxaCartao || 0;
     const comissao = p.comissao || 0;
@@ -234,7 +235,7 @@ export default function MixPrecoLote() {
     if (filterMode === 'prejuizo') list = list.filter(p => !p.isValidMargem);
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [produtos, custosFixos, searchTerm, filterMode]);
+  }, [validProdutos, custosFixos, searchTerm, filterMode]);
 
   const sortedProdutos = useMemo(() => {
     const list = [...filteredProdutos];
@@ -257,7 +258,7 @@ export default function MixPrecoLote() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterMode, sortConfig, produtos.length]);
+  }, [searchTerm, filterMode, sortConfig, validProdutos.length]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -269,12 +270,12 @@ export default function MixPrecoLote() {
   );
 
   const distribuirIgualmenteNow = () => {
-    if (produtos.length === 0) return;
-    const fatia = 100 / produtos.length;
+    if (validProdutos.length === 0) return;
+    const fatia = 100 / validProdutos.length;
     const updated = produtos.map((p, idx) => ({
       ...p,
-      percentualRateio: idx === produtos.length - 1
-        ? Number((100 - fatia * (produtos.length - 1)).toFixed(4))
+      percentualRateio: idx === validProdutos.length - 1
+        ? Number((100 - fatia * (validProdutos.length - 1)).toFixed(4))
         : Number(fatia.toFixed(4)),
     }));
     setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
@@ -293,7 +294,7 @@ export default function MixPrecoLote() {
   // Aplica o mesmo valor de um campo (margem, taxa, imposto ou outros) para todos os produtos,
   // guardando os valores individuais anteriores para permitir desfazer.
   const applyBulkNow = (field: BulkField) => {
-    if (produtos.length === 0) return;
+    if (validProdutos.length === 0) return;
     const meta = BULK_FIELD_META[field];
     const value = bulkInputs[field];
 
@@ -399,7 +400,7 @@ export default function MixPrecoLote() {
                   <button
                     type="button"
                     onClick={() => requestConfirm(actionKey, () => applyBulkNow(field))}
-                    disabled={produtos.length === 0}
+                    disabled={validProdutos.length === 0}
                     className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       isConfirming
                         ? 'bg-amber-500 text-white hover:bg-amber-600'
@@ -727,7 +728,7 @@ export default function MixPrecoLote() {
                 );
               })}
 
-              {produtos.length === 0 && (
+              {validProdutos.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                     Nenhum produto cadastrado. Adicione produtos na aba Custos Variáveis.
@@ -735,7 +736,7 @@ export default function MixPrecoLote() {
                 </tr>
               )}
 
-              {produtos.length > 0 && sortedProdutos.length === 0 && (
+              {validProdutos.length > 0 && sortedProdutos.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                     Nenhum produto encontrado para "{searchTerm}"{filterMode !== 'todos' ? ' com o filtro aplicado' : ''}.
@@ -769,7 +770,7 @@ export default function MixPrecoLote() {
         )}
       </div>
 
-      {produtos.length > 0 && (
+      {validProdutos.length > 0 && (
         <div className="bg-card border border-border rounded-xl shadow-sm p-6 mt-6">
           <h2 className="text-xl font-bold text-foreground mb-4 text-center">Composição de Custos do Mix de Vendas</h2>
           <div className="flex flex-col md:flex-row items-center gap-8">
@@ -847,7 +848,7 @@ export default function MixPrecoLote() {
                     <button
                       type="button"
                       onClick={() => requestConfirm('distribuir-igual', distribuirIgualmenteNow)}
-                      disabled={produtos.length === 0}
+                      disabled={validProdutos.length === 0}
                       className={`inline-flex justify-center items-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                         confirmingAction === 'distribuir-igual'
                           ? 'border-amber-400 bg-amber-500 text-white'

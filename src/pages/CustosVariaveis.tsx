@@ -13,16 +13,18 @@ export default function CustosVariaveis() {
   const [isImporting, setIsImporting] = useState(false);
   
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortConfig, setSortConfig] = useState<{ key: 'nome' | 'cmv' | 'vendasProjetadas', direction: 'asc' | 'desc' } | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: 'nome' | 'cmv' | 'vendasProjetadas' | 'precoFixo', direction: 'asc' | 'desc' } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editNome, setEditNome] = useState('');
   const [editCmv, setEditCmv] = useState('');
   const [editVendas, setEditVendas] = useState('');
+  const [editPrecoVenda, setEditPrecoVenda] = useState('');
+  const [novoPrecoVenda, setNovoPrecoVenda] = useState('');
 
   const MAX_PRODUTOS = user ? (user.role === 'admin' || user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7)) : 5;
   const isLimitReached = produtos.length >= MAX_PRODUTOS;
 
-  const handleSort = (key: 'nome' | 'cmv' | 'vendasProjetadas') => {
+  const handleSort = (key: 'nome' | 'cmv' | 'vendasProjetadas' | 'precoFixo') => {
     let direction: 'asc' | 'desc' = 'asc';
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
       direction = 'desc';
@@ -30,7 +32,7 @@ export default function CustosVariaveis() {
     setSortConfig({ key, direction });
   };
 
-  const getSortIcon = (key: 'nome' | 'cmv' | 'vendasProjetadas') => {
+  const getSortIcon = (key: 'nome' | 'cmv' | 'vendasProjetadas' | 'precoFixo') => {
     if (!sortConfig || sortConfig.key !== key) return <ArrowUpDown className="w-4 h-4 ml-1 opacity-50" />;
     return sortConfig.direction === 'asc' ? <ArrowUp className="w-4 h-4 ml-1" /> : <ArrowDown className="w-4 h-4 ml-1" />;
   };
@@ -50,6 +52,7 @@ export default function CustosVariaveis() {
     setEditNome(p.nome);
     setEditCmv(p.cmv.toString());
     setEditVendas(p.vendasProjetadas?.toString() || '0');
+    setEditPrecoVenda(p.precoFixo?.toString() || p.precoIdeal?.toString() || '0');
   };
 
   const cancelEditing = () => {
@@ -62,7 +65,9 @@ export default function CustosVariaveis() {
       ...p,
       nome: editNome,
       cmv: Number(editCmv),
-      vendasProjetadas: Number(editVendas) || 0
+      vendasProjetadas: Number(editVendas) || 0,
+      precoFixo: Number(editPrecoVenda) || 0,
+      modoPrecificacao: Number(editPrecoVenda) > 0 ? 'preco' : p.modoPrecificacao
     });
     setEditingId(null);
   };
@@ -76,6 +81,8 @@ export default function CustosVariaveis() {
       nome: novoNome, 
       cmv: Number(novoCmv),
       vendasProjetadas: Number(vendasProjetadas) || 0,
+      precoFixo: Number(novoPrecoVenda) || 0,
+      modoPrecificacao: Number(novoPrecoVenda) > 0 ? 'preco' : 'margem',
       imposto: 0,
       taxaCartao: 0,
       comissao: 0,
@@ -86,6 +93,7 @@ export default function CustosVariaveis() {
     setNovoNome('');
     setNovoCmv('');
     setVendasProjetadas('');
+    setNovoPrecoVenda('');
   };
 
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -125,7 +133,9 @@ export default function CustosVariaveis() {
         comissao: 0,
         margem: 0,
         percentualRateio: 0,
-        precoIdeal: p.salePrice || 0
+        precoIdeal: p.salePrice || 0,
+        precoFixo: p.salePrice || 0,
+        modoPrecificacao: p.salePrice > 0 ? 'preco' : 'margem'
       }));
 
       // Limit to MAX_PRODUTOS
@@ -311,6 +321,9 @@ export default function CustosVariaveis() {
                 <th className="px-6 py-4 cursor-pointer hover:bg-muted/80 transition-colors" onClick={() => handleSort('vendasProjetadas')}>
                   <div className="flex items-center">Vendas Projetadas/Mês {getSortIcon('vendasProjetadas')}</div>
                 </th>
+                <th className="px-6 py-4 cursor-pointer hover:bg-muted/80 transition-colors" onClick={() => handleSort('precoFixo')}>
+                  <div className="flex items-center">Preço de Venda (R$) {getSortIcon('precoFixo')}</div>
+                </th>
                 <th className="px-6 py-4 w-32">Ações</th>
               </tr>
             </thead>
@@ -329,6 +342,9 @@ export default function CustosVariaveis() {
                         <input type="number" value={editVendas} onChange={e => setEditVendas(e.target.value)} className="w-full px-2 py-1 border border-primary/50 rounded bg-background text-sm" />
                       </td>
                       <td className="px-6 py-4">
+                        <input type="number" value={editPrecoVenda} onChange={e => setEditPrecoVenda(e.target.value)} className="w-full px-2 py-1 border border-primary/50 rounded bg-background text-sm" />
+                      </td>
+                      <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <button onClick={() => saveEditing(p)} className="text-emerald-600 hover:text-emerald-700 p-1 bg-emerald-50 hover:bg-emerald-100 rounded transition-colors" title="Salvar">
                             <Save className="w-4 h-4" />
@@ -344,6 +360,7 @@ export default function CustosVariaveis() {
                       <td className="px-6 py-4 font-medium text-foreground">{p.nome}</td>
                       <td className="px-6 py-4 font-medium text-red-600">{formatCurrency(p.cmv)}</td>
                       <td className="px-6 py-4 text-foreground">{p.vendasProjetadas || 0} un</td>
+                      <td className="px-6 py-4 font-medium text-emerald-600">{p.precoFixo > 0 ? formatCurrency(p.precoFixo) : (p.precoIdeal > 0 ? formatCurrency(p.precoIdeal) : '-')}</td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <button onClick={() => startEditing(p)} className="text-blue-500 hover:text-blue-700 transition-colors" title="Editar Produto">
@@ -360,7 +377,7 @@ export default function CustosVariaveis() {
               ))}
               {filteredAndSortedProdutos.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
+                  <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
                     {produtos.length === 0 ? 'Nenhum item cadastrado. Adicione seu primeiro produto ou serviço acima.' : 'Nenhum produto encontrado na busca.'}
                   </td>
                 </tr>
