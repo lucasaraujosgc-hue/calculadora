@@ -124,18 +124,18 @@ export default function CustosVariaveis() {
 
       // Merge imported products into local state
       const newItems = data.imported.map((p: any) => ({
-        id: crypto.randomUUID(),
+        id: p.id || crypto.randomUUID(),
         nome: p.name,
         cmv: p.costPrice,
         vendasProjetadas: p.projectedSales || 0,
-        imposto: 0,
-        taxaCartao: 0,
-        comissao: 0,
-        margem: 0,
-        percentualRateio: 0,
-        precoIdeal: p.salePrice || 0,
-        precoFixo: p.salePrice || 0,
-        modoPrecificacao: p.salePrice > 0 ? 'preco' : 'margem'
+        imposto: p.imposto || 0,
+        taxaCartao: p.taxaCartao || 0,
+        comissao: p.comissao || 0,
+        margem: p.margem || 0,
+        percentualRateio: p.percentualRateio || 0,
+        precoIdeal: p.precoIdeal || p.salePrice || 0,
+        precoFixo: p.precoFixo || p.salePrice || 0,
+        modoPrecificacao: p.modoPrecificacao || (p.salePrice > 0 ? 'preco' : 'margem')
       }));
 
       // Limit to MAX_PRODUTOS

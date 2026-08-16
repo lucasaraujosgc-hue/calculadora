@@ -1,3 +1,4 @@
+
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -485,6 +486,14 @@ app.get("/api/products", requireUser, async (req: any, res) => {
     cmv: p.costPrice,
     precoVenda: p.salePrice,
     vendasProjetadas: p.projectedSales,
+    imposto: p.imposto || 0,
+    taxaCartao: p.taxaCartao || 0,
+    comissao: p.comissao || 0,
+    margem: p.margem || 0,
+    precoIdeal: p.precoIdeal || 0,
+    precoFixo: p.precoFixo || 0,
+    percentualRateio: p.percentualRateio || 0,
+    modoPrecificacao: p.modoPrecificacao || 'margem',
     isSample: p.isSample
   })));
 });
@@ -503,9 +512,17 @@ app.post("/api/products/sync", requireUser, async (req: any, res) => {
         await tx.insert(products).values({
           userId: req.currentUser.id,
           name: p.nome || p.name,
-          costPrice: p.custo || p.costPrice || 0,
-          salePrice: p.precoVenda || p.salePrice || 0,
-          projectedSales: p.vendasProjetadas || p.projectedSales || 0,
+          costPrice: p.cmv ?? p.custo ?? p.costPrice ?? 0,
+          salePrice: p.precoFixo ?? p.precoVenda ?? p.salePrice ?? 0,
+          projectedSales: p.vendasProjetadas ?? p.projectedSales ?? 0,
+          imposto: p.imposto ?? 0,
+          taxaCartao: p.taxaCartao ?? 0,
+          comissao: p.comissao ?? 0,
+          margem: p.margem ?? 0,
+          precoIdeal: p.precoIdeal ?? 0,
+          precoFixo: p.precoFixo ?? 0,
+          percentualRateio: p.percentualRateio ?? 0,
+          modoPrecificacao: p.modoPrecificacao ?? 'margem',
           isSample: false
         });
       }
@@ -540,9 +557,17 @@ app.put("/api/products/:id", requireUser, async (req: any, res) => {
   const updated = await db.update(products)
     .set({
       name: req.body.nome || req.body.name,
-      costPrice: req.body.cmv || req.body.costPrice,
-      salePrice: req.body.precoVenda || req.body.salePrice,
-      projectedSales: req.body.vendasProjetadas || req.body.projectedSales
+      costPrice: req.body.cmv ?? req.body.costPrice,
+      salePrice: req.body.precoFixo ?? req.body.precoVenda ?? req.body.salePrice,
+      projectedSales: req.body.vendasProjetadas ?? req.body.projectedSales,
+      imposto: req.body.imposto ?? 0,
+      taxaCartao: req.body.taxaCartao ?? 0,
+      comissao: req.body.comissao ?? 0,
+      margem: req.body.margem ?? 0,
+      precoIdeal: req.body.precoIdeal ?? 0,
+      precoFixo: req.body.precoFixo ?? 0,
+      percentualRateio: req.body.percentualRateio ?? 0,
+      modoPrecificacao: req.body.modoPrecificacao ?? 'margem'
     })
     .where(and(eq(products.id, req.params.id as any), eq(products.userId, req.currentUser.id))).returning();
   if (updated.length > 0) {
@@ -613,6 +638,14 @@ app.post("/api/products/import", requireUser, requireExcelImport, upload.single(
         costPrice: Number(row.precoCusto),
         salePrice: Number(row.precoVenda),
         projectedSales: row.vendasProjetadas != null ? Number(row.vendasProjetadas) : 0,
+        imposto: 0,
+        taxaCartao: 0,
+        comissao: 0,
+        margem: 0,
+        precoIdeal: Number(row.precoVenda),
+        precoFixo: Number(row.precoVenda),
+        percentualRateio: 0,
+        modoPrecificacao: Number(row.precoVenda) > 0 ? 'preco' : 'margem',
         isSample: false
       }).returning();
       imported.push(inserted[0]);
@@ -868,3 +901,5 @@ async function setupVite() {
 setupVite();
 
 export { app };
+
+
