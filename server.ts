@@ -584,13 +584,15 @@ app.post("/api/products/import", requireUser, requireExcelImport, upload.single(
     const errors: any[] = [];
     rows.forEach((row, i) => {
       const nome = row.nome || row.Nome || row.produto || row.Produto;
-      const precoCusto = row.preco_custo ?? row["Preço de Custo"] ?? row.custo;
+      const precoCusto = row.preco_custo ?? row["Preço de Custo"] ?? row.custo ?? row.cmv ?? row["Custo Variável"] ?? row.custo_variavel;
       const precoVenda = row.preco_venda ?? row["Preço de Venda"] ?? row.preco;
+      const vendasProjetadas = row.vendas_projetadas ?? row["Vendas Projetadas"] ?? row.vendas ?? row.projetadas ?? 0;
+      
       if (!nome || precoCusto == null || isNaN(Number(precoCusto))) {
         errors.push({ linha: i + 2, motivo: "Faltando nome ou preço de custo inválido" });
         return;
       }
-      validRows.push({nome, precoCusto, precoVenda});
+      validRows.push({nome, precoCusto, precoVenda, vendasProjetadas});
     });
     
     if (userProducts.length + validRows.length > plan.productLimit) {
@@ -606,6 +608,7 @@ app.post("/api/products/import", requireUser, requireExcelImport, upload.single(
         name: row.nome,
         costPrice: Number(row.precoCusto),
         salePrice: row.precoVenda != null ? Number(row.precoVenda) : 0,
+        projectedSales: row.vendasProjetadas != null ? Number(row.vendasProjetadas) : 0,
         isSample: false
       }).returning();
       imported.push(inserted[0]);

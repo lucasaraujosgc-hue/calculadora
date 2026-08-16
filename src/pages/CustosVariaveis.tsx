@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Lock, Upload } from 'lucide-react';
+import { Plus, Trash2, Lock, Upload, Edit, Save, X, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Link } from 'react-router-dom';
 import { formatCurrency } from '../utils/format';
@@ -11,9 +11,61 @@ export default function CustosVariaveis() {
   const [vendasProjetadas, setVendasProjetadas] = useState('');
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortConfig, setSortConfig] = useState<{ key: 'nome' | 'cmv' | 'vendasProjetadas', direction: 'asc' | 'desc' } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editNome, setEditNome] = useState('');
+  const [editCmv, setEditCmv] = useState('');
+  const [editVendas, setEditVendas] = useState('');
 
   const MAX_PRODUTOS = user ? (user.role === 'admin' || user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7)) : 5;
   const isLimitReached = produtos.length >= MAX_PRODUTOS;
+
+  const handleSort = (key: 'nome' | 'cmv' | 'vendasProjetadas') => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortIcon = (key: 'nome' | 'cmv' | 'vendasProjetadas') => {
+    if (!sortConfig || sortConfig.key !== key) return <ArrowUpDown className="w-4 h-4 ml-1 opacity-50" />;
+    return sortConfig.direction === 'asc' ? <ArrowUp className="w-4 h-4 ml-1" /> : <ArrowDown className="w-4 h-4 ml-1" />;
+  };
+
+  const filteredAndSortedProdutos = [...produtos]
+    .filter(p => p.nome.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => {
+      if (!sortConfig) return 0;
+      const { key, direction } = sortConfig;
+      if (a[key] < b[key]) return direction === 'asc' ? -1 : 1;
+      if (a[key] > b[key]) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+  const startEditing = (p: any) => {
+    setEditingId(p.id);
+    setEditNome(p.nome);
+    setEditCmv(p.cmv.toString());
+    setEditVendas(p.vendasProjetadas?.toString() || '0');
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+  };
+
+  const saveEditing = (p: any) => {
+    if (!editNome || !editCmv) return;
+    saveProduto({
+      ...p,
+      nome: editNome,
+      cmv: Number(editCmv),
+      vendasProjetadas: Number(editVendas) || 0
+    });
+    setEditingId(null);
+  };
 
   const handleAdd = () => {
     if (!novoNome || !novoCmv) return;
@@ -67,7 +119,7 @@ export default function CustosVariaveis() {
         id: crypto.randomUUID(),
         nome: p.name,
         cmv: p.costPrice,
-        vendasProjetadas: 0,
+        vendasProjetadas: p.projectedSales || 0,
         imposto: 0,
         taxaCartao: 0,
         comissao: 0,
@@ -233,33 +285,83 @@ export default function CustosVariaveis() {
           </div>
         </div>
 
+        <div className="p-4 border-b border-border bg-background flex justify-between items-center">
+          <div className="relative w-full max-w-sm">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input 
+              type="text" 
+              placeholder="Buscar produto..." 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 border border-border rounded-md bg-muted/30 focus:bg-background focus:ring-2 focus:ring-primary/50 text-sm transition-colors"
+            />
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead className="bg-muted/50 text-muted-foreground font-medium border-b border-border">
               <tr>
-                <th className="px-6 py-4">Produto / Serviço</th>
-                <th className="px-6 py-4">Custo Variável Unit. (R$)</th>
-                <th className="px-6 py-4">Vendas Projetadas/Mês</th>
-                <th className="px-6 py-4 w-20">Ações</th>
+                <th className="px-6 py-4 cursor-pointer hover:bg-muted/80 transition-colors" onClick={() => handleSort('nome')}>
+                  <div className="flex items-center">Produto / Serviço {getSortIcon('nome')}</div>
+                </th>
+                <th className="px-6 py-4 cursor-pointer hover:bg-muted/80 transition-colors" onClick={() => handleSort('cmv')}>
+                  <div className="flex items-center">Custo Variável Unit. (R$) {getSortIcon('cmv')}</div>
+                </th>
+                <th className="px-6 py-4 cursor-pointer hover:bg-muted/80 transition-colors" onClick={() => handleSort('vendasProjetadas')}>
+                  <div className="flex items-center">Vendas Projetadas/Mês {getSortIcon('vendasProjetadas')}</div>
+                </th>
+                <th className="px-6 py-4 w-32">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {produtos.map((p) => (
+              {filteredAndSortedProdutos.map((p) => (
                 <tr key={p.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-6 py-4 font-medium text-foreground">{p.nome}</td>
-                  <td className="px-6 py-4 font-medium text-red-600">{formatCurrency(p.cmv)}</td>
-                  <td className="px-6 py-4 text-foreground">{p.vendasProjetadas || 0} un</td>
-                  <td className="px-6 py-4">
-                    <button onClick={() => handleRemove(p.id)} className="text-red-500 hover:text-red-700">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
+                  {editingId === p.id ? (
+                    <>
+                      <td className="px-6 py-4">
+                        <input type="text" value={editNome} onChange={e => setEditNome(e.target.value)} className="w-full px-2 py-1 border border-primary/50 rounded bg-background text-sm" />
+                      </td>
+                      <td className="px-6 py-4">
+                        <input type="number" value={editCmv} onChange={e => setEditCmv(e.target.value)} className="w-full px-2 py-1 border border-primary/50 rounded bg-background text-sm" />
+                      </td>
+                      <td className="px-6 py-4">
+                        <input type="number" value={editVendas} onChange={e => setEditVendas(e.target.value)} className="w-full px-2 py-1 border border-primary/50 rounded bg-background text-sm" />
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => saveEditing(p)} className="text-emerald-600 hover:text-emerald-700 p-1 bg-emerald-50 hover:bg-emerald-100 rounded transition-colors" title="Salvar">
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button onClick={cancelEditing} className="text-muted-foreground hover:text-foreground p-1 hover:bg-muted rounded transition-colors" title="Cancelar">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-6 py-4 font-medium text-foreground">{p.nome}</td>
+                      <td className="px-6 py-4 font-medium text-red-600">{formatCurrency(p.cmv)}</td>
+                      <td className="px-6 py-4 text-foreground">{p.vendasProjetadas || 0} un</td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => startEditing(p)} className="text-blue-500 hover:text-blue-700 transition-colors" title="Editar Produto">
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleRemove(p.id)} className="text-red-500 hover:text-red-700 transition-colors" title="Excluir Produto">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
-              {produtos.length === 0 && (
+              {filteredAndSortedProdutos.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
-                    Nenhum item cadastrado. Adicione seu primeiro produto ou serviço acima.
+                    {produtos.length === 0 ? 'Nenhum item cadastrado. Adicione seu primeiro produto ou serviço acima.' : 'Nenhum produto encontrado na busca.'}
                   </td>
                 </tr>
               )}

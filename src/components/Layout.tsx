@@ -16,9 +16,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { name: 'Custos Fixos', path: '/custos-fixos', icon: Wallet },
     { name: 'Produtos', path: '/custos-variaveis', icon: DollarSign },
     { name: 'Impostos', path: '/impostos', icon: Percent },
-    { name: 'Formação de Preço', path: '/formacao-preco', icon: Calculator },
+    { name: 'Formação de Preço', path: '/formacao-preco', icon: Calculator, highlight: 'bg-red-500/10 text-red-600 border-red-500/20' },
     // { name: 'Mix de Preços', path: '/mix-preco', icon: Box, highlight: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' },
-    { name: 'Preços em Lote', path: '/mix-preco-lote', icon: Layers },
+    { name: 'Preços em Lote', path: '/mix-preco-lote', icon: Layers, highlight: 'bg-purple-500/10 text-purple-600 border-purple-500/20' },
     ...(user ? [{ name: 'Planos e Upgrades', path: '/planos', icon: Star, highlight: 'bg-amber-500/10 text-amber-600 border-amber-500/20' }] : []),
     { name: 'Minha Conta', path: '/configuracoes', icon: Settings },
   ];
@@ -74,7 +74,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               className={`flex items-center ${isCollapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2'} rounded-md text-sm font-medium transition-colors border border-transparent ${
                 isActive 
                   ? (item.highlight ? item.highlight.replace('/10', '/20') : 'bg-primary text-primary-foreground')
-                  : (item.highlight ? `${item.highlight} hover:bg-muted/50` : 'text-muted-foreground hover:bg-muted hover:text-foreground')
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
             >
               <item.icon className="h-5 w-5 shrink-0" />
@@ -92,7 +92,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <span className="text-sm font-semibold truncate text-foreground">{user.name}</span>
                   <span className="text-xs text-muted-foreground truncate">{user.email}</span>
                 </div>
-                <div title={`Plano Atual: ${user.plan === 'ilimitado' ? 'Ilimitado' : user.plan === 'intermediario' ? 'Intermediário' : user.plan === 'basico' ? 'Básico' : 'Gratuito'}`} className="ml-2 flex shrink-0 items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary">
+                <div title={`Plano Atual: ${user.plan === 'ilimitado' ? 'Ilimitado' : user.plan === 'intermediario' ? 'Intermediário' : user.plan === 'basico' ? 'Básico' : 'Gratuito'}${user.role === 'admin' ? ' (Admin)' : ''}`} className="ml-2 flex shrink-0 items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary">
                   {user.plan && user.plan !== 'free' && user.plan !== 'gratuito' ? (
                     <Crown className="w-5 h-5 fill-current text-amber-500" />
                   ) : (

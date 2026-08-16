@@ -95,7 +95,7 @@ export default function FormacaoPreco() {
   const margemContribuicao = precoFinal - custo - valorImposto - valorTaxa - valorComissao; 
   
   const isValidMargem = margemContribuicao > 0;
-  const peUnidades = isValidMargem ? (custoFixoTotal / margemContribuicao) : Infinity;
+  const peUnidades = isValidMargem ? (valorRateadoCF / margemContribuicao) : Infinity;
 
   const vendasPorDia = vendasProjetadas / 30;
   const diasParaAtingir = (isValidMargem && vendasPorDia > 0) ? peUnidades / vendasPorDia : Infinity;
@@ -275,16 +275,16 @@ export default function FormacaoPreco() {
               <p className="text-sm text-primary/80 font-medium flex gap-2 items-start">
                 <span className="shrink-0 mt-0.5">ℹ️</span>
                 <span>
-                  <strong>Nota sobre Custos Fixos:</strong> Esta projeção individual considera, para fins de cálculo, que <strong>apenas este produto</strong> será responsável por pagar 100% das despesas fixas do negócio. Para ratear os custos entre vários produtos, acesse a aba "Preços em Lote".
+                  <strong>Nota sobre Custos Fixos:</strong> Esta projeção considera o <strong>Custeio Fixo - Rateio (%)</strong> informado na seção de Vendas. O Ponto de Equilíbrio indica quantas unidades deste produto precisam ser vendidas para pagar a parcela rateada do custo fixo.
                 </span>
               </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
                <div>
-                  <p className="text-sm font-medium text-muted-foreground mb-1">Total de Custos Fixos</p>
-                  <p className="text-2xl font-bold text-foreground">{formatCurrency(custoFixoTotal)}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Soma de todas as despesas da operação.</p>
+                  <p className="text-sm font-medium text-muted-foreground mb-1">Custo Fixo Rateado</p>
+                  <p className="text-2xl font-bold text-foreground">{formatCurrency(valorRateadoCF)}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Parcela do custo fixo que este produto deve pagar.</p>
                </div>
                <div>
                   <p className="text-sm font-medium text-muted-foreground mb-1">Ponto de Equilíbrio (Unidades)</p>
