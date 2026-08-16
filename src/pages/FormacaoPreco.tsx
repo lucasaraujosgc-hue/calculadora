@@ -6,6 +6,7 @@ import { formatCurrency } from '../utils/format';
 
 export default function FormacaoPreco() {
   const { produtos, custosFixos, saveProduto } = useAppContext();
+  const validProdutos = produtos.filter(p => p.cmv > 0);
   
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   
@@ -24,10 +25,10 @@ export default function FormacaoPreco() {
 
   // Sync selected product
   useEffect(() => {
-    if (produtos.length > 0 && !selectedProductId) {
-      setSelectedProductId(produtos[0].id);
+    if (validProdutos.length > 0 && !selectedProductId) {
+      setSelectedProductId(validProdutos[0].id);
     }
-  }, [produtos]);
+  }, [validProdutos, selectedProductId]);
 
   useEffect(() => {
     const p = produtos.find(p => p.id === selectedProductId);
