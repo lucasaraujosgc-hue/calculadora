@@ -18,6 +18,7 @@ export default function FormacaoPreco() {
   const [vendasProjetadas, setVendasProjetadas] = useState(100);
   const [modoPrecificacao, setModoPrecificacao] = useState<'margem' | 'preco'>('margem');
   const [precoFixo, setPrecoFixo] = useState(0);
+  const [percentualRateio, setPercentualRateio] = useState(100);
 
   const custoFixoTotal = custosFixos.reduce((acc, curr) => acc + curr.valor, 0);
 
@@ -38,6 +39,7 @@ export default function FormacaoPreco() {
       if (p.imposto !== undefined) setImposto(p.imposto);
       if (p.taxaCartao !== undefined) setTaxaCartao(p.taxaCartao);
       if (p.comissao !== undefined) setComissao(p.comissao);
+      if (p.percentualRateio !== undefined) setPercentualRateio(p.percentualRateio);
       if (p.margem !== undefined) setMargem(p.margem);
     }
   }, [selectedProductId, produtos]);
@@ -56,7 +58,8 @@ export default function FormacaoPreco() {
           margem, 
           precoIdeal: precoFinal,
           modoPrecificacao,
-          precoFixo
+          precoFixo,
+          percentualRateio
         };
       }
       return p;
@@ -66,7 +69,8 @@ export default function FormacaoPreco() {
   };
 
   // --- Calculations ---
-  const custoFixoUnitario = vendasProjetadas > 0 ? (custoFixoTotal / vendasProjetadas) : 0;
+  const valorRateadoCF = (percentualRateio / 100) * custoFixoTotal;
+  const custoFixoUnitario = vendasProjetadas > 0 ? (valorRateadoCF / vendasProjetadas) : 0;
 
   const despesasVariaveisPerc = imposto + taxaCartao + comissao;
   const totalPerc = despesasVariaveisPerc + margem;
@@ -167,6 +171,11 @@ export default function FormacaoPreco() {
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Vendas Projetadas (Mês)</label>
                 <input type="number" value={vendasProjetadas} onChange={e => setVendasProjetadas(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-1">Custeio Fixo - Rateio (%)</label>
+                <input type="number" value={percentualRateio} onChange={e => setPercentualRateio(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
+                <p className="text-xs text-muted-foreground mt-1">Parcela do custo fixo global (100% = total) que as vendas deste produto vão cobrir.</p>
               </div>
             </div>
 

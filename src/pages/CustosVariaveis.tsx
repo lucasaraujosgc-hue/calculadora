@@ -12,7 +12,7 @@ export default function CustosVariaveis() {
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  const MAX_PRODUTOS = user ? (user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7)) : 5;
+  const MAX_PRODUTOS = user ? (user.role === 'admin' || user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7)) : 5;
   const isLimitReached = produtos.length >= MAX_PRODUTOS;
 
   const handleAdd = () => {

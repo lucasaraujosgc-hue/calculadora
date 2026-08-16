@@ -76,23 +76,6 @@ async function requireUser(req: any, res: any, next: any) {
   try {
     const payload: any = jwt.verify(token, JWT_SECRET as string);
     
-    // Suporte ao admin hardcoded no .env que não está no banco
-    if (
-      process.env.ADMIN_EMAIL &&
-      payload.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase() &&
-      payload.role === 'admin'
-    ) {
-      req.currentUser = {
-        id: "admin-system",
-        name: "Admin",
-        email: payload.email,
-        role: "admin",
-        planId: "ilimitado",
-        isVerified: true
-      };
-      return next();
-    }
-
     const userList = await db.select().from(users).where(eq(users.email, payload.email));
     if (userList.length === 0) return res.status(401).json({ error: "Usuário não encontrado" });
     req.currentUser = userList[0];
@@ -266,9 +249,31 @@ app.post("/api/login", authLimiter, async (req, res) => {
       email === process.env.ADMIN_EMAIL.toLowerCase() &&
       password === process.env.ADMIN_PASSWORD
     ) {
+      let adminUserList = await db.select().from(users).where(eq(users.email, email));
+      let adminUser;
+      if (adminUserList.length === 0) {
+        const passwordHash = await bcrypt.hash(password, 10);
+        const inserted = await db.insert(users).values({
+          name: 'Admin',
+          email: email,
+          passwordHash,
+          role: 'admin',
+          planId: 'ilimitado',
+          isVerified: true,
+          verificationToken: 'admin'
+        }).returning();
+        adminUser = inserted[0];
+      } else {
+        adminUser = adminUserList[0];
+        if (adminUser.role !== 'admin' || adminUser.planId !== 'ilimitado') {
+          const updated = await db.update(users).set({ role: 'admin', planId: 'ilimitado' }).where(eq(users.email, email)).returning();
+          adminUser = updated[0];
+        }
+      }
+
       const adminToken = jwt.sign(
-        { email: process.env.ADMIN_EMAIL, role: 'admin' },
-        JWT_SECRET as string,
+        { email: adminUser.email, role: 'admin' },
+        JWT_SECRET,
         { expiresIn: "30d" }
       );
       res.cookie("admin_token", adminToken, {
@@ -285,7 +290,7 @@ app.post("/api/login", authLimiter, async (req, res) => {
       });
       return res.json({ 
         success: true, 
-        user: { id: 'admin-system', name: 'Admin', email: process.env.ADMIN_EMAIL, phone: '', role: 'admin', isVerified: true, plan: 'ilimitado', productLimit: Infinity }
+        user: adminUser
       });
     }
 
