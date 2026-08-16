@@ -10,6 +10,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Wand2,
+  BrainCircuit,
   Undo2,
   AlertTriangle,
   CheckCircle2,
@@ -279,6 +280,61 @@ export default function MixPrecoLote() {
         : Number(fatia.toFixed(4)),
     }));
     setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
+  };
+
+  const distribuirInteligentemente = () => {
+    if (validProdutos.length === 0) return;
+
+    let receitaTotalMix = 0;
+    const receitasPorId: Record<string, number> = {};
+
+    processedProdutos.forEach(p => {
+      const receita = p.preco * p.vendas;
+      receitasPorId[p.id] = receita;
+      receitaTotalMix += receita;
+    });
+
+    if (receitaTotalMix === 0) {
+      alert("Não há dados suficientes de receita (preços × vendas) para calcular de forma inteligente. Caindo de volta para a divisão igual.");
+      distribuirIgualmenteNow();
+      return;
+    }
+
+    let somaFatias = 0;
+    let ultimoProdutoId = '';
+    
+    for (let i = processedProdutos.length - 1; i >= 0; i--) {
+      if (receitasPorId[processedProdutos[i].id] > 0) {
+        ultimoProdutoId = processedProdutos[i].id;
+        break;
+      }
+    }
+
+    const updated = produtos.map(p => {
+      if (!validProdutos.find(v => v.id === p.id)) {
+        return p;
+      }
+
+      const receita = receitasPorId[p.id] || 0;
+      let percentual = 0;
+
+      if (receita > 0) {
+        if (p.id === ultimoProdutoId) {
+          percentual = Number((100 - somaFatias).toFixed(4));
+        } else {
+          percentual = Number(((receita / receitaTotalMix) * 100).toFixed(4));
+          somaFatias += percentual;
+        }
+      }
+
+      return {
+        ...p,
+        percentualRateio: percentual
+      };
+    });
+
+    setProdutos(updated);
+    syncProdutos(updated).catch(err => console.error(err));
   };
 
   const handleDistribuirPendenteEntreSemRateio = () => {
@@ -858,6 +914,20 @@ export default function MixPrecoLote() {
                     >
                       <Wand2 className="w-3.5 h-3.5" />
                       {confirmingAction === 'distribuir-igual' ? 'Confirmar?' : 'Distribuir igual'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => requestConfirm('distribuir-inteligente', distribuirInteligentemente)}
+                      disabled={validProdutos.length === 0}
+                      className={`inline-flex justify-center items-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        confirmingAction === 'distribuir-inteligente'
+                          ? 'border-amber-400 bg-amber-500 text-white'
+                          : 'border-border bg-background hover:bg-muted/50'
+                      }`}
+                      title="Divide o rateio proporcionalmente à receita projetada (preço × vendas) de cada produto"
+                    >
+                      <BrainCircuit className="w-3.5 h-3.5" />
+                      {confirmingAction === 'distribuir-inteligente' ? 'Confirmar?' : 'Distribuir inteligente'}
                     </button>
                     <button
                       type="button"
