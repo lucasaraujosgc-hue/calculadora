@@ -1,4 +1,3 @@
-
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -810,6 +809,74 @@ app.post("/api/products/import", requireUser, requireExcelImport, upload.single(
   }
 });
 
+// Limpa todos os produtos de um usuário (mesmo efeito do "Limpar Todos" da aba Custos Variáveis,
+// só que acionado pelo admin de dentro de "Gerenciar Dados do Cliente")
+app.delete("/api/admin/users/:userId/products", requireAdmin, async (req: any, res) => {
+  try {
+    await db.delete(products).where(and(eq(products.userId, req.params.userId), eq(products.isSample, false)));
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Erro ao limpar produtos (admin):", error);
+    res.status(500).json({ error: "Erro ao limpar produtos do usuário." });
+  }
+});
+
+// Importa uma planilha de produtos para um usuário específico, em nome do admin.
+// Reaproveita o mesmo parser de /api/products/import, mas sem checar o limite do plano
+// do cliente, já que é uma ação deliberada do admin.
+app.post("/api/admin/users/:userId/products/import", requireAdmin, upload.single("file"), async (req: any, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+    const validRows: any[] = [];
+    const errors: any[] = [];
+    rows.forEach((row, i) => {
+      const nome = row.nome || row.Nome || row.produto || row.Produto;
+      const precoCusto = row.preco_custo ?? row["Preço de Custo"] ?? row.custo ?? row.cmv ?? row["Custo Variável"] ?? row.custo_variavel;
+      const precoVenda = row.preco_venda ?? row["Preço de Venda"] ?? row.preco;
+      const vendasProjetadas = row.vendas_projetadas ?? row["Vendas Projetadas"] ?? row.vendas ?? row.projetadas ?? 0;
+
+      if (!nome) {
+        errors.push({ linha: i + 2, motivo: "Faltando nome do produto" });
+        return;
+      }
+
+      const parsedCusto = precoCusto != null && !isNaN(Number(precoCusto)) ? Number(precoCusto) : 0;
+      const parsedVenda = precoVenda != null && !isNaN(Number(precoVenda)) ? Number(precoVenda) : 0;
+
+      validRows.push({ nome, precoCusto: parsedCusto, precoVenda: parsedVenda, vendasProjetadas });
+    });
+
+    const imported = [];
+    for (const row of validRows) {
+      const inserted = await db.insert(products).values({
+        userId: req.params.userId,
+        name: row.nome,
+        costPrice: Number(row.precoCusto),
+        salePrice: Number(row.precoVenda),
+        projectedSales: row.vendasProjetadas != null ? Number(row.vendasProjetadas) : 0,
+        imposto: 0,
+        taxaCartao: 0,
+        comissao: 0,
+        margem: 0,
+        precoIdeal: Number(row.precoVenda),
+        precoFixo: Number(row.precoVenda),
+        percentualRateio: 0,
+        modoPrecificacao: Number(row.precoVenda) > 0 ? 'preco' : 'margem',
+        isSample: false
+      }).returning();
+      imported.push(inserted[0]);
+    }
+    res.json({ success: true, importedCount: imported.length, imported, errors });
+  } catch (error) {
+    console.error("Erro ao importar planilha (admin):", error);
+    res.status(500).json({ error: "Erro ao processar a planilha." });
+  }
+});
+
 app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
   try {
     const { planId } = req.body || {};
@@ -1056,5 +1123,3 @@ async function setupVite() {
 setupVite();
 
 export { app };
-
-

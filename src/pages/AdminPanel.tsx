@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Shield, Trash2, CheckCircle2, XCircle, UserCog, Settings, Plus, X } from 'lucide-react';
+import { Shield, Trash2, CheckCircle2, XCircle, UserCog, Settings, Plus, X, Upload } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
 export default function AdminPanel() {
@@ -25,9 +25,13 @@ export default function AdminPanel() {
   const [novoCustoNome, setNovoCustoNome] = useState('');
   const [novoCustoValor, setNovoCustoValor] = useState('');
 
+  const [isConfirmingClearProducts, setIsConfirmingClearProducts] = useState(false);
+  const [isImportingProducts, setIsImportingProducts] = useState(false);
+
   const openUserPanel = (u: any) => {
     setSelectedUser(u);
     setActiveTab('produtos');
+    setIsConfirmingClearProducts(false);
     fetchUserData(u.id);
   };
 
@@ -73,6 +77,48 @@ export default function AdminPanel() {
       const res = await fetch(`/api/admin/users/${selectedUser.id}/products/${id}`, { method: 'DELETE' });
       if (res.ok) fetchUserData(selectedUser.id);
     } catch (err) {}
+  };
+
+  const handleClearAllProducts = async () => {
+    if (!isConfirmingClearProducts) {
+      setIsConfirmingClearProducts(true);
+      setTimeout(() => setIsConfirmingClearProducts(false), 3000);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/users/${selectedUser.id}/products`, { method: 'DELETE' });
+      if (res.ok) fetchUserData(selectedUser.id);
+    } catch (err) {
+      console.error(err);
+    }
+    setIsConfirmingClearProducts(false);
+  };
+
+  const handleImportProductsAdmin = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedUser) return;
+    setIsImportingProducts(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch(`/api/admin/users/${selectedUser.id}/products/import`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Planilha importada: ${data.importedCount} produto(s) adicionados.${data.errors?.length ? ` ${data.errors.length} linha(s) com erro.` : ''}`);
+        fetchUserData(selectedUser.id);
+      } else {
+        alert(data.error || 'Erro ao importar planilha.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro de conexão ao importar planilha.');
+    } finally {
+      setIsImportingProducts(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleAddCost = async () => {
@@ -289,13 +335,13 @@ export default function AdminPanel() {
                 className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'produtos' ? 'border-b-2 border-primary text-primary bg-background' : 'text-muted-foreground hover:bg-muted/50'}`}
                 onClick={() => setActiveTab('produtos')}
               >
-                Produtos (${userProducts.length})
+                Produtos ({userProducts.length})
               </button>
               <button 
                 className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'custos' ? 'border-b-2 border-primary text-primary bg-background' : 'text-muted-foreground hover:bg-muted/50'}`}
                 onClick={() => setActiveTab('custos')}
               >
-                Custos Fixos (${userCosts.length})
+                Custos Fixos ({userCosts.length})
               </button>
             </div>
 
@@ -311,9 +357,16 @@ export default function AdminPanel() {
                       <input placeholder="Custo (R$)" type="number" className="border rounded-md px-3 py-2 text-sm bg-background" value={novoProdCmv} onChange={e=>setNovoProdCmv(e.target.value)}/>
                       <input placeholder="Vendas/mês" type="number" className="border rounded-md px-3 py-2 text-sm bg-background" value={novoProdVendas} onChange={e=>setNovoProdVendas(e.target.value)}/>
                     </div>
-                    <button onClick={handleAddProduct} className="mt-3 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 flex items-center gap-2">
-                      <Plus className="w-4 h-4"/> Salvar Produto
-                    </button>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button onClick={handleAddProduct} className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 flex items-center gap-2">
+                        <Plus className="w-4 h-4"/> Salvar Produto
+                      </button>
+                      <label className={`flex items-center justify-center border-2 border-dashed border-primary/50 text-primary bg-primary/5 px-4 py-2 rounded-md font-medium hover:bg-primary/10 hover:border-primary transition-all text-sm cursor-pointer ${isImportingProducts ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        <Upload className="w-4 h-4 mr-2" />
+                        {isImportingProducts ? 'Importando...' : 'Importar Excel'}
+                        <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportProductsAdmin} disabled={isImportingProducts} />
+                      </label>
+                    </div>
                   </div>
                   
                   <div className="border border-border rounded-lg overflow-hidden bg-card">
@@ -323,17 +376,21 @@ export default function AdminPanel() {
                           <th className="px-4 py-3 font-medium">Nome</th>
                           <th className="px-4 py-3 font-medium text-right">Custo (R$)</th>
                           <th className="px-4 py-3 font-medium text-right">Vendas/Mês</th>
+                          <th className="px-4 py-3 font-medium text-right">Preço de Venda (R$)</th>
                           <th className="px-4 py-3 font-medium w-16"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
                         {userProducts.length === 0 ? (
-                          <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">Nenhum produto cadastrado para este usuário.</td></tr>
+                          <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Nenhum produto cadastrado para este usuário.</td></tr>
                         ) : userProducts.map(p => (
                           <tr key={p.id} className="hover:bg-muted/30">
                             <td className="px-4 py-2 font-medium">{p.nome}</td>
                             <td className="px-4 py-2 text-right">{(p.cmv||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
                             <td className="px-4 py-2 text-right">{p.vendasProjetadas||0}</td>
+                            <td className="px-4 py-2 text-right font-medium text-emerald-600">
+                              {p.precoFixo > 0 ? p.precoFixo.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}
+                            </td>
                             <td className="px-4 py-2 text-right">
                               <button onClick={() => handleDeleteProduct(p.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4"/></button>
                             </td>
@@ -341,6 +398,22 @@ export default function AdminPanel() {
                         ))}
                       </tbody>
                     </table>
+
+                    {userProducts.length > 0 && (
+                      <div className="p-3 border-t border-border bg-muted/10 flex justify-end">
+                        <button
+                          onClick={handleClearAllProducts}
+                          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                            isConfirmingClearProducts
+                              ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600'
+                              : 'text-red-600 bg-red-50 hover:bg-red-100 border border-red-200'
+                          }`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          {isConfirmingClearProducts ? 'Confirmar Exclusão?' : 'Limpar Todos os Produtos'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (

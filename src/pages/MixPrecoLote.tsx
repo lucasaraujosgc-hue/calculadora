@@ -109,6 +109,11 @@ export default function MixPrecoLote() {
   const [bulkSnapshots, setBulkSnapshots] = useState<Partial<Record<BulkField, Record<string, number>>>>({});
   const [isPadronizarOpen, setIsPadronizarOpen] = useState(false);
 
+  // Painel de pesos da distribuição inteligente (aberto ao clicar em "Distribuir inteligente")
+  const [showPesoConfig, setShowPesoConfig] = useState(false);
+  const [pesos, setPesos] = useState({ vendas: 30, receita: 30, lucro: 40 });
+  const somaPesos = pesos.vendas + pesos.receita + pesos.lucro;
+
   // Confirmação inline (evita depender de window.confirm, que fica bloqueado em alguns
   // ambientes de preview em iframe — ex: templates do AI Studio — e fazia os botões
   // parecerem não funcionar).
@@ -284,49 +289,73 @@ export default function MixPrecoLote() {
     setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
   };
 
-  const distribuirInteligentemente = () => {
+  // Distribuição inteligente 100% client-side: calcula, para cada produto, um índice
+  // ponderado a partir de 3 dimensões (participação nas vendas, na receita e na
+  // capacidade de gerar lucro), com pesos ajustáveis pelo usuário no painel abaixo do botão.
+  const distribuirInteligentemente = (pesosAtuais: { vendas: number; receita: number; lucro: number }) => {
     if (validProdutos.length === 0) return;
 
-    let receitaTotalMix = 0;
-    const receitasPorId: Record<string, number> = {};
+    const somaPesosInformados = pesosAtuais.vendas + pesosAtuais.receita + pesosAtuais.lucro;
+    if (somaPesosInformados <= 0) {
+      alert("Defina ao menos um peso maior que zero para calcular a distribuição.");
+      return;
+    }
+
+    // Os pesos não precisam somar exatamente 100 — são normalizados aqui.
+    const wVendas = pesosAtuais.vendas / somaPesosInformados;
+    const wReceita = pesosAtuais.receita / somaPesosInformados;
+    const wLucro = pesosAtuais.lucro / somaPesosInformados;
+
+    const n = processedProdutos.length;
+
+    let totalVendas = 0;
+    let totalReceita = 0;
+    let totalLucroPositivo = 0;
 
     processedProdutos.forEach(p => {
-      const receita = p.preco * p.vendas;
-      receitasPorId[p.id] = receita;
-      receitaTotalMix += receita;
+      totalVendas += p.vendas;
+      totalReceita += p.preco * p.vendas;
+      // Capacidade de gerar lucro = margem de contribuição total do produto (preço - custo variável) × vendas.
+      // Produtos com resultado negativo entram com 0 aqui para não "puxar" o índice para baixo.
+      totalLucroPositivo += Math.max(0, p.margemContribuicao * p.vendas);
     });
 
-    if (receitaTotalMix === 0) {
-      alert("Não há dados suficientes de receita (preços × vendas) para calcular de forma inteligente. Caindo de volta para a divisão igual.");
+    if (totalVendas === 0 && totalReceita === 0 && totalLucroPositivo === 0) {
+      alert("Não há dados suficientes (vendas, receita ou capacidade de gerar lucro) para calcular a distribuição inteligente. Caindo de volta para a divisão igual.");
       distribuirIgualmenteNow();
       return;
     }
 
+    const indicesPorId: Record<string, number> = {};
+    let somaIndices = 0;
+
+    processedProdutos.forEach(p => {
+      const shareVendas = totalVendas > 0 ? p.vendas / totalVendas : 1 / n;
+      const shareReceita = totalReceita > 0 ? (p.preco * p.vendas) / totalReceita : 1 / n;
+      const lucroPositivo = Math.max(0, p.margemContribuicao * p.vendas);
+      const shareLucro = totalLucroPositivo > 0 ? lucroPositivo / totalLucroPositivo : 1 / n;
+
+      const indice = shareVendas * wVendas + shareReceita * wReceita + shareLucro * wLucro;
+      indicesPorId[p.id] = indice;
+      somaIndices += indice;
+    });
+
     let somaFatias = 0;
-    let ultimoProdutoId = '';
-    
-    for (let i = processedProdutos.length - 1; i >= 0; i--) {
-      if (receitasPorId[processedProdutos[i].id] > 0) {
-        ultimoProdutoId = processedProdutos[i].id;
-        break;
-      }
-    }
+    const ultimoProdutoId = processedProdutos[processedProdutos.length - 1]?.id;
 
     const updated = produtos.map(p => {
       if (!validProdutos.find(v => v.id === p.id)) {
         return p;
       }
 
-      const receita = receitasPorId[p.id] || 0;
       let percentual = 0;
-
-      if (receita > 0) {
-        if (p.id === ultimoProdutoId) {
-          percentual = Number((100 - somaFatias).toFixed(4));
-        } else {
-          percentual = Number(((receita / receitaTotalMix) * 100).toFixed(4));
-          somaFatias += percentual;
-        }
+      if (p.id === ultimoProdutoId) {
+        // Último produto absorve o resto, evitando erro de arredondamento (soma diferente de 100%).
+        percentual = Number((100 - somaFatias).toFixed(4));
+      } else {
+        const indice = indicesPorId[p.id] || 0;
+        percentual = somaIndices > 0 ? Number(((indice / somaIndices) * 100).toFixed(4)) : 0;
+        somaFatias += percentual;
       }
 
       return {
@@ -1001,18 +1030,95 @@ export default function MixPrecoLote() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => requestConfirm('distribuir-inteligente', distribuirInteligentemente)}
+                      onClick={() => setShowPesoConfig(v => !v)}
                       disabled={validProdutos.length === 0}
                       className={`inline-flex justify-center items-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                        confirmingAction === 'distribuir-inteligente'
+                        showPesoConfig
                           ? 'border-amber-400 bg-amber-500 text-white'
                           : 'border-border bg-background hover:bg-muted/50'
                       }`}
-                      title="Divide o rateio proporcionalmente à receita projetada (preço × vendas) de cada produto"
+                      title="Divide o rateio por um índice ponderado (volume de vendas, receita e capacidade de gerar lucro) — os pesos são ajustáveis"
                     >
                       <BrainCircuit className="w-3.5 h-3.5" />
-                      {confirmingAction === 'distribuir-inteligente' ? 'Confirmar?' : 'Distribuir inteligente'}
+                      Distribuir inteligente
+                      {showPesoConfig ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
+
+                    {showPesoConfig && (
+                      <div className="p-3 rounded-lg border border-border bg-muted/20 space-y-3">
+                        <p className="text-[11px] text-muted-foreground">
+                          Ajuste o peso de cada critério (não precisa somar 100% — é normalizado automaticamente):
+                        </p>
+
+                        <div className="space-y-2.5">
+                          <div>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="font-medium text-foreground">Volume de vendas</span>
+                              <span className="font-semibold text-primary">{pesos.vendas}%</span>
+                            </div>
+                            <input
+                              type="range" min={0} max={100} value={pesos.vendas}
+                              onChange={e => setPesos(p => ({ ...p, vendas: Number(e.target.value) }))}
+                              className="w-full accent-primary"
+                            />
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="font-medium text-foreground">Receita</span>
+                              <span className="font-semibold text-primary">{pesos.receita}%</span>
+                            </div>
+                            <input
+                              type="range" min={0} max={100} value={pesos.receita}
+                              onChange={e => setPesos(p => ({ ...p, receita: Number(e.target.value) }))}
+                              className="w-full accent-primary"
+                            />
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="font-medium text-foreground">Capacidade de gerar lucro</span>
+                              <span className="font-semibold text-primary">{pesos.lucro}%</span>
+                            </div>
+                            <input
+                              type="range" min={0} max={100} value={pesos.lucro}
+                              onChange={e => setPesos(p => ({ ...p, lucro: Number(e.target.value) }))}
+                              className="w-full accent-primary"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border">
+                          <span className="text-muted-foreground">Soma atual</span>
+                          <span className={`font-semibold ${somaPesos === 100 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            {somaPesos}%
+                          </span>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => requestConfirm('distribuir-inteligente-aplicar', () => {
+                              distribuirInteligentemente(pesos);
+                              setShowPesoConfig(false);
+                            })}
+                            disabled={validProdutos.length === 0 || somaPesos === 0}
+                            className={`flex-1 inline-flex justify-center items-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                              confirmingAction === 'distribuir-inteligente-aplicar'
+                                ? 'border-amber-400 bg-amber-500 text-white'
+                                : 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
+                            }`}
+                          >
+                            {confirmingAction === 'distribuir-inteligente-aplicar' ? 'Confirmar?' : 'Aplicar distribuição'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPesos({ vendas: 30, receita: 30, lucro: 40 })}
+                            className="text-xs font-medium px-2 py-1.5 rounded border border-border bg-background hover:bg-muted/50"
+                          >
+                            Padrão
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={handleDistribuirPendenteEntreSemRateio}
