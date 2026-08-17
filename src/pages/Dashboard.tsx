@@ -7,11 +7,23 @@ import { calculateSellingPrice, calculateContributionMargin } from '../domain/pr
 import { formatCurrency } from '../utils/format';
 
 export default function Dashboard() {
-  const { produtos, custosFixos, saveProduto } = useAppContext();
+  const { produtos, custosFixos, saveProduto, snapshots, createSnapshot } = useAppContext();
 
   const [metaLucro, setMetaLucro] = useState<number>(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editVendas, setEditVendas] = useState<number>(0);
+  const [modoSimulador, setModoSimulador] = useState<'proporcional' | 'inteligente'>('proporcional');
+
+  const [varCmv, setVarCmv] = useState<number>(0);
+  const [varVendas, setVarVendas] = useState<number>(0);
+  const [varCustoFixo, setVarCustoFixo] = useState<number>(0);
+
+  const resetSimulation = () => {
+    setVarCmv(0);
+    setVarVendas(0);
+    setVarCustoFixo(0);
+  };
+
 
   const custoFixoTotal = custosFixos.reduce((a, b) => a + b.valor, 0);
 
@@ -21,6 +33,9 @@ export default function Dashboard() {
   let custosVariaveisTotais = 0;
   let impostoValorTotal = 0;
   let taxasComissoesValorTotal = 0;
+
+  let produtosComPrejuizo: { nome: string; margem: number }[] = [];
+
 
   const mcUnitMap: Record<string, number> = {};
 
@@ -59,7 +74,12 @@ export default function Dashboard() {
     impostoValorTotal += valorImposto * vendas;
     taxasComissoesValorTotal += valorTaxasCom * vendas;
     
+    
     const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom;
+    if (margemContribuicao < 0) {
+      produtosComPrejuizo.push({ nome: p.nome, margem: margemContribuicao });
+    }
+
     mcUnitMap[p.id] = margemContribuicao;
     
     margemContribuicaoTotal += margemContribuicao * vendas;
@@ -105,7 +125,127 @@ export default function Dashboard() {
   // Simulador de Meta de Lucro
   const fatorMeta = margemContribuicaoTotal > 0 ? (custoFixoTotal + metaLucro) / margemContribuicaoTotal : 0;
   const gapSimulador = (custoFixoTotal + metaLucro) - margemContribuicaoTotal;
+
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const previousSnapshots = snapshots.filter(s => new Date(s.createdAt) < startOfMonth);
+  const lastMonthSnapshot = previousSnapshots.length > 0 ? previousSnapshots[0] : null;
+
+  let lastFaturamento = 0;
+  let lastLucro = 0;
+  let lastCustoFixo = 0;
+  let lastPercMargem = 0;
+
+  if (lastMonthSnapshot) {
+    let lastMargemContribuicaoTotal = 0;
+    lastCustoFixo = lastMonthSnapshot.custoFixoTotal;
+    
+    lastMonthSnapshot.produtos.forEach(p => {
+       const vendas = p.vendasProjetadas || 0;
+       const imposto = p.imposto || 0;
+       const taxa = p.taxaCartao || 0;
+       const com = p.comissao || 0;
+       const margem = p.margem || 0;
+       const rateio = p.percentualRateio || 0;
+       
+       const valorRateadoCF = (rateio / 100) * lastCustoFixo;
+       const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
+       
+       let preco = 0;
+       if (p.modoPrecificacao === 'preco') {
+         preco = p.precoFixo || 0;
+       } else {
+         preco = calculateSellingPrice(p.cmv, custoFixoUnitario, imposto/100, taxa/100, com/100, margem/100);
+       }
+       lastFaturamento += preco * vendas;
+       
+       const valorImposto = preco * (imposto / 100);
+       const valorTaxasCom = preco * ((taxa + com) / 100);
+       
+       const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom;
+       lastMargemContribuicaoTotal += margemContribuicao * vendas;
+    });
+
+    lastLucro = lastMargemContribuicaoTotal - lastCustoFixo;
+    lastPercMargem = lastFaturamento > 0 ? (lastMargemContribuicaoTotal / lastFaturamento) * 100 : 0;
+  }
+
+  const varFat = lastFaturamento > 0 ? ((receitaEstimada - lastFaturamento) / lastFaturamento) * 100 : 0;
+  const varLuc = lastLucro !== 0 ? ((lucroLiquidoTotal - lastLucro) / Math.abs(lastLucro)) * 100 : 0;
+  const varCF = lastCustoFixo > 0 ? ((custoFixoTotal - lastCustoFixo) / lastCustoFixo) * 100 : 0;
+  const varPercMC = percMargemContribuicao - lastPercMargem;
+  
+  const renderVar = (val: number, inverse = false) => {
+    const isGood = inverse ? val < 0 : val > 0;
+    const isBad = inverse ? val > 0 : val < 0;
+    const color = isGood ? 'text-emerald-600' : isBad ? 'text-red-600' : 'text-muted-foreground';
+    const Icon = val >= 0 ? ArrowUpRight : ArrowDownRight;
+    if (val === 0) return <span className="text-xs text-muted-foreground ml-2">0%</span>;
+    return <span className={`text-xs font-medium ml-2 inline-flex items-center ${color}`}><Icon className="w-3 h-3 mr-0.5" />{Math.abs(val).toFixed(1)}%</span>
+  };
+
+  // Scenario Simulator Calculations
+  let simFat = 0;
+  let simMC = 0;
+  const simCustoFixo = custoFixoTotal * (1 + varCustoFixo / 100);
+
+  produtos.forEach(p => {
+    const pCmv = p.cmv * (1 + varCmv / 100);
+    const pVendas = (p.vendasProjetadas || 0) * (1 + varVendas / 100);
+    const imposto = p.imposto || 0;
+    const taxa = p.taxaCartao || 0;
+    const com = p.comissao || 0;
+    const margem = p.margem || 0;
+    const rateio = p.percentualRateio || 0;
+
+    const valorRateadoCF = (rateio / 100) * simCustoFixo;
+    const custoFixoUnitario = pVendas > 0 ? (valorRateadoCF / pVendas) : 0;
+
+    let preco = 0;
+    if (p.modoPrecificacao === 'preco') {
+      preco = p.precoFixo || 0;
+    } else {
+      preco = calculateSellingPrice(pCmv, custoFixoUnitario, imposto/100, taxa/100, com/100, margem/100);
+    }
+    simFat += preco * pVendas;
+
+    const valorImposto = preco * (imposto / 100);
+    const valorTaxasCom = preco * ((taxa + com) / 100);
+    const margemContribuicao = preco - pCmv - valorImposto - valorTaxasCom;
+    simMC += margemContribuicao * pVendas;
+  });
+  const simLucro = simMC - simCustoFixo;
+
   const somaMCUnits = produtos.reduce((acc, p) => acc + (mcUnitMap[p.id] || 0), 0);
+
+  const exportExcel = (isDashboard: boolean) => {
+    import('xlsx').then((XLSX) => {
+      const wb = XLSX.utils.book_new();
+      
+      const wsResumo = XLSX.utils.json_to_sheet([
+        { Metrica: "Faturamento Projetado", Valor: receitaEstimada },
+        { Metrica: "Custo Fixo Total", Valor: custoFixoTotal },
+        { Metrica: "Custo Variável Total", Valor: custosVariaveisTotais },
+        { Metrica: "Despesas Variáveis", Valor: despesasVariaveisTotal },
+        { Metrica: "Margem de Contribuição Total", Valor: margemContribuicaoTotal },
+        { Metrica: "Lucro Líquido Estimado", Valor: lucroLiquidoTotal },
+        { Metrica: "Ponto de Equilíbrio", Valor: pontoEquilibrioFaturamento }
+      ]);
+      XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo");
+
+      const prodData = produtos.map(p => ({
+        "Produto": p.nome,
+        "CMV": p.cmv,
+        "Vendas Proj.": p.vendasProjetadas,
+        "Rateio (%)": p.percentualRateio,
+        "Margem Contrib. (Un)": mcUnitMap[p.id] || 0
+      }));
+      const wsProd = XLSX.utils.json_to_sheet(prodData);
+      XLSX.utils.book_append_sheet(wb, wsProd, "Produtos");
+
+      XLSX.writeFile(wb, `relatorio-dashboard-${new Date().toISOString().split('T')[0]}.xlsx`);
+    });
+  };
 
   const handleSaveEdit = (p: ProdutoItem) => {
     saveProduto({ ...p, vendasProjetadas: editVendas });
@@ -114,12 +254,35 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 pb-12">
-      <div className="flex justify-between items-end">
+            <div className="flex justify-between items-end">
         <div>
           <h1 className="text-3xl font-serif text-primary">Dashboard Financeiro</h1>
           <p className="text-muted-foreground mt-1 text-sm">Visão geral real baseada nos seus cadastros.</p>
         </div>
+        <div className="flex gap-2">
+           <button onClick={() => exportExcel(true)} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
+             <FileText className="w-4 h-4"/> Excel
+           </button>
+           <button onClick={() => window.print()} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
+             <FileText className="w-4 h-4"/> PDF
+           </button>
+        </div>
       </div>
+
+      {produtosComPrejuizo.length > 0 && (
+        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+             <p className="text-sm font-medium">
+               ⚠️ {produtosComPrejuizo.length} produto(s) vendendo no prejuízo: {produtosComPrejuizo.slice(0,3).map(p => p.nome).join(', ')}{produtosComPrejuizo.length > 3 ? ` e mais ${produtosComPrejuizo.length - 3} outros` : ''}.
+             </p>
+             <Link to="/mix-preco-lote?filter=prejuizo" className="text-sm font-semibold underline mt-2 inline-block hover:text-red-900">
+               Corrigir no Mix de Preços
+             </Link>
+          </div>
+        </div>
+      )}
+
 
       {(isRateioIncompleto || isRateioExcedido) && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-lg flex items-start gap-3">

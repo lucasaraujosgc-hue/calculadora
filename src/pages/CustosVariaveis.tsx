@@ -67,7 +67,7 @@ export default function CustosVariaveis() {
       cmv: Number(editCmv),
       vendasProjetadas: Number(editVendas) || 0,
       precoFixo: Number(editPrecoVenda) || 0,
-      modoPrecificacao: Number(editPrecoVenda) > 0 ? 'preco' : p.modoPrecificacao
+      modoPrecificacao: (Number(editPrecoVenda) > 0 ? 'preco' : p.modoPrecificacao) as 'preco' | 'margem'
     });
     setEditingId(null);
   };
@@ -82,7 +82,7 @@ export default function CustosVariaveis() {
       cmv: Number(novoCmv),
       vendasProjetadas: Number(vendasProjetadas) || 0,
       precoFixo: Number(novoPrecoVenda) || 0,
-      modoPrecificacao: Number(novoPrecoVenda) > 0 ? 'preco' : 'margem',
+      modoPrecificacao: (Number(novoPrecoVenda) > 0 ? 'preco' : 'margem') as 'preco' | 'margem',
       imposto: 0,
       taxaCartao: 0,
       comissao: 0,
@@ -135,7 +135,7 @@ export default function CustosVariaveis() {
         percentualRateio: p.percentualRateio || 0,
         precoIdeal: p.precoIdeal || p.salePrice || 0,
         precoFixo: p.precoFixo || p.salePrice || 0,
-        modoPrecificacao: p.modoPrecificacao || (p.salePrice > 0 ? 'preco' : 'margem')
+        modoPrecificacao: (p.modoPrecificacao || (p.salePrice > 0 ? 'preco' : 'margem')) as 'preco' | 'margem'
       }));
 
       // Limit to MAX_PRODUTOS

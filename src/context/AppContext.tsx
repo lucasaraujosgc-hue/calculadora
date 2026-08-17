@@ -31,6 +31,15 @@ export type ProdutoItem = {
   precoFixo?: number;
 };
 
+export type SnapshotItem = {
+  id: string;
+  createdAt: string;
+  label: string;
+  custoFixoTotal: number;
+  produtos: ProdutoItem[];
+  custosFixos: CustoFixoItem[];
+};
+
 type AppContextType = {
   user: User | null;
   login: (u: User, remember: boolean) => void;
@@ -47,6 +56,9 @@ type AppContextType = {
   removeProduto: (id: string) => Promise<void>;
   saveCustoFixo: (c: CustoFixoItem) => Promise<void>;
   removeCustoFixo: (id: string) => Promise<void>;
+  snapshots: SnapshotItem[];
+  fetchSnapshots: () => Promise<void>;
+  createSnapshot: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -85,6 +97,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const parsed = saved ? JSON.parse(saved) : null;
     return parsed && parsed.length > 0 ? parsed : defaultCustos;
   });
+  const [snapshots, setSnapshots] = useState<SnapshotItem[]>([]);
   const [produtos, setProdutos] = useState<ProdutoItem[]>(() => {
     const saved = localStorage.getItem('vc_produtos') || sessionStorage.getItem('vc_produtos');
     const parsed = saved ? JSON.parse(saved) : null;
@@ -184,6 +197,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   
+  const fetchSnapshots = async () => {
+    if (user && !isGuest) {
+      try {
+        const res = await fetch('/api/snapshots');
+        if (res.ok) {
+          const data = await res.json();
+          setSnapshots(data);
+        }
+      } catch(e) {}
+    }
+  };
+
+  const createSnapshot = async () => {
+    if (user && !isGuest) {
+      try {
+        const res = await fetch('/api/snapshots', { method: 'POST' });
+        if (res.ok) {
+          await fetchSnapshots();
+        }
+      } catch(e) {}
+    }
+  };
+
+  useEffect(() => {
+    if (user && !isGuest) {
+      fetchSnapshots();
+      // Auto-create snapshot on login/mount once
+      createSnapshot();
+    } else {
+      setSnapshots([]);
+    }
+  }, [user, isGuest]);
+
   const saveProduto = async (p: ProdutoItem) => {
     if (user && !isGuest) {
       const isExisting = produtos.find(prod => prod.id === p.id);
@@ -274,7 +320,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       custosFixos, setCustosFixos,
       produtos, setProdutos,
       saveProduto, removeProduto, syncProdutos,
-      saveCustoFixo, removeCustoFixo
+      saveCustoFixo, removeCustoFixo,
+      snapshots, fetchSnapshots, createSnapshot
     }}>
       {children}
     </AppContext.Provider>

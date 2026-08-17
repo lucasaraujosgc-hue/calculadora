@@ -10,8 +10,8 @@ import nodemailer from "nodemailer";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { db } from "./src/db/index.js";
-import { users, products, fixedCosts, payments, courses, leads, webhookEvents } from "./src/db/schema.js";
-import { eq, and } from "drizzle-orm";
+import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots } from "./src/db/schema.js";
+import { eq, and, gte, desc } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import multer from "multer";
@@ -123,7 +123,7 @@ app.get("/api/admin/leads", requireAdmin, async (req, res) => {
 });
 
 // --- User management (used by AdminPanel.tsx) ---
-import { desc } from "drizzle-orm";
+
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
   const allUsers = await db.select().from(users).orderBy(desc(users.createdAt)).limit(200);
   const allLeads = await db.select().from(leads);
@@ -467,6 +467,82 @@ app.put("/api/fixed-costs/:id", requireUser, async (req: any, res) => {
 app.delete("/api/fixed-costs/:id", requireUser, async (req: any, res) => {
   await db.delete(fixedCosts).where(and(eq(fixedCosts.id, req.params.id as any), eq(fixedCosts.userId, req.currentUser.id)));
   res.json({ success: true });
+
+
+// --- Snapshots ---
+app.get("/api/snapshots", requireUser, async (req: any, res) => {
+  try {
+    const list = await db
+      .select()
+      .from(snapshots)
+      .where(eq(snapshots.userId, req.currentUser.id))
+      .orderBy(desc(snapshots.createdAt))
+      .limit(12);
+    res.json(list);
+  } catch (error) {
+    console.error("Erro ao buscar snapshots:", error);
+    res.status(500).json({ error: "Erro interno no servidor." });
+  }
+});
+
+app.post("/api/snapshots", requireUser, async (req: any, res) => {
+  try {
+    const userId = req.currentUser.id;
+    // Pega os produtos e custos atuais do banco
+    const userProducts = await db.select().from(products).where(eq(products.userId, userId));
+    const userCosts = await db.select().from(fixedCosts).where(eq(fixedCosts.userId, userId));
+    const custoFixoTotal = userCosts.reduce((a, b) => a + b.amount, 0);
+
+    // Tenta encontrar um snapshot deste mês para atualizar, ou cria novo
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    
+    // label ex: "Agosto/2026"
+    const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const label = `${months[now.getMonth()]}/${now.getFullYear()}`;
+
+    const existing = await db
+      .select()
+      .from(snapshots)
+      .where(
+        and(
+          eq(snapshots.userId, userId),
+          gte(snapshots.createdAt, startOfMonth)
+        )
+      )
+      .orderBy(desc(snapshots.createdAt))
+      .limit(1);
+
+    if (existing.length > 0) {
+      // Update
+      const updated = await db.update(snapshots)
+        .set({
+          produtos: userProducts,
+          custosFixos: userCosts,
+          custoFixoTotal,
+          label
+        })
+        .where(eq(snapshots.id, existing[0].id))
+        .returning();
+      res.json(updated[0]);
+    } else {
+      // Insert
+      const inserted = await db.insert(snapshots)
+        .values({
+          userId,
+          produtos: userProducts,
+          custosFixos: userCosts,
+          custoFixoTotal,
+          label
+        })
+        .returning();
+      res.json(inserted[0]);
+    }
+  } catch (error) {
+    console.error("Erro ao salvar snapshot:", error);
+    res.status(500).json({ error: "Erro interno no servidor." });
+  }
+});
 });
 
 async function checkProductLimit(req: any, res: any, next: any) {
