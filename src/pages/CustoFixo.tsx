@@ -15,7 +15,7 @@ export default function CustoFixo() {
 
   const handleAdd = () => {
     if (!novoNome || !novoValor) return;
-    const item = { id: Date.now().toString(), nome: novoNome, valor: Number(novoValor) };
+    const item = { id: crypto.randomUUID(), nome: novoNome, valor: Number(novoValor) };
     saveCustoFixo(item);
     setNovoNome('');
     setNovoValor('');

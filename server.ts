@@ -659,6 +659,11 @@ app.put("/api/products/:id", requireUser, async (req: any, res) => {
   } else res.status(404).json({ error: "Produto não encontrado" });
 });
 app.delete("/api/products/:id", requireUser, async (req: any, res) => {
+  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (!uuidRegex.test(req.params.id)) {
+     // If it's not a valid UUID, just return success (likely a local-only sample item)
+     return res.json({ success: true, warning: 'Invalid UUID format ignored' });
+  }
   await db.delete(products).where(and(eq(products.id, req.params.id as any), eq(products.userId, req.currentUser.id)));
   res.json({ success: true });
 });

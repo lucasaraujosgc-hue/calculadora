@@ -77,7 +77,7 @@ export default function CustosVariaveis() {
     if (isLimitReached) return;
     
     const item = { 
-      id: Date.now().toString(), 
+      id: crypto.randomUUID(), 
       nome: novoNome, 
       cmv: Number(novoCmv),
       vendasProjetadas: Number(vendasProjetadas) || 0,
