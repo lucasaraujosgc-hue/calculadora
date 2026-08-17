@@ -118,6 +118,77 @@ app.delete("/api/admin/courses/:id", requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
+// --- Admin User Data Management ---
+app.get("/api/admin/users/:userId/products", requireAdmin, async (req: any, res) => {
+  const list = await db.select().from(products).where(and(eq(products.userId, req.params.userId), eq(products.isSample, false)));
+  res.json(list.map(p => ({
+    id: p.id,
+    nome: p.name,
+    cmv: p.costPrice,
+    vendasProjetadas: p.projectedSales,
+    imposto: p.imposto || 0,
+    taxaCartao: p.taxaCartao || 0,
+    comissao: p.comissao || 0,
+    margem: p.margem || 0,
+    precoFixo: p.precoFixo || 0,
+    percentualRateio: p.percentualRateio || 0,
+    modoPrecificacao: p.modoPrecificacao || 'margem'
+  })));
+});
+
+app.post("/api/admin/users/:userId/products", requireAdmin, async (req: any, res) => {
+  const p = req.body;
+  const inserted = await db.insert(products).values({
+    userId: req.params.userId,
+    name: p.nome,
+    costPrice: p.cmv,
+    salePrice: p.precoFixo || 0,
+    projectedSales: p.vendasProjetadas || 0,
+    isSample: false,
+    imposto: p.imposto || 0,
+    taxaCartao: p.taxaCartao || 0,
+    comissao: p.comissao || 0,
+    margem: p.margem || 0,
+    precoFixo: p.precoFixo || 0,
+    percentualRateio: p.percentualRateio || 0,
+    modoPrecificacao: p.modoPrecificacao || 'margem'
+  }).returning();
+  
+  const c = inserted[0];
+  res.json({ success: true, product: {
+    id: c.id, nome: c.name, cmv: c.costPrice, vendasProjetadas: c.projectedSales,
+    imposto: c.imposto || 0, taxaCartao: c.taxaCartao || 0, comissao: c.comissao || 0,
+    margem: c.margem || 0, precoFixo: c.precoFixo || 0, percentualRateio: c.percentualRateio || 0,
+    modoPrecificacao: c.modoPrecificacao || 'margem'
+  }});
+});
+
+app.delete("/api/admin/users/:userId/products/:id", requireAdmin, async (req: any, res) => {
+  await db.delete(products).where(and(eq(products.id, req.params.id as any), eq(products.userId, req.params.userId)));
+  res.json({ success: true });
+});
+
+app.get("/api/admin/users/:userId/fixed-costs", requireAdmin, async (req: any, res) => {
+  const list = await db.select().from(fixedCosts).where(eq(fixedCosts.userId, req.params.userId));
+  res.json(list.map(c => ({ id: c.id, nome: c.name, valor: c.amount })));
+});
+
+app.post("/api/admin/users/:userId/fixed-costs", requireAdmin, async (req: any, res) => {
+  const inserted = await db.insert(fixedCosts).values({
+    userId: req.params.userId,
+    name: req.body.nome,
+    amount: req.body.valor
+  }).returning();
+  const c = inserted[0];
+  res.json({ success: true, cost: { id: c.id, nome: c.name, valor: c.amount } });
+});
+
+app.delete("/api/admin/users/:userId/fixed-costs/:id", requireAdmin, async (req: any, res) => {
+  await db.delete(fixedCosts).where(and(eq(fixedCosts.id, req.params.id as any), eq(fixedCosts.userId, req.params.userId)));
+  res.json({ success: true });
+});
+
+
 app.get("/api/admin/leads", requireAdmin, async (req, res) => {
   const allLeads = await db.select().from(leads);
   res.json(allLeads);
@@ -134,6 +205,7 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
   });
   
   res.json(allUsers.map(u => ({
+    id: u.id,
     name: u.name,
     email: u.email,
     phone: phoneMap.get(u.email.toLowerCase()) || '',
