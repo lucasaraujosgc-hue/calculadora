@@ -963,7 +963,9 @@ async function setupVite() {
     // Run migrations on startup
     
     try {
-      await migrate(db, { migrationsFolder: "drizzle" });
+      const { execSync } = require("child_process");
+      console.log("Executando drizzle-kit push (sincronização do schema)...");
+      execSync("npx drizzle-kit push --force", { stdio: "inherit", env: process.env });
     } catch (err) {
       console.error("Falha crítica ao rodar as migrations do banco de dados. Encerrando o processo.", err);
       if (process.env.NODE_ENV === "production") {
