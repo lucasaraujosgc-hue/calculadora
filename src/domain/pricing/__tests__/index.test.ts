@@ -100,7 +100,7 @@ describe('Pricing Engine', () => {
     // margem = 20%
     // Deductions = 0.10 + 0.05 + 0.02 + 0.20 = 0.37
     // Selling Price = 100 / (1 - 0.37) = 100 / 0.63 = 158.730158...
-    const sp = calculateSellingPrice(100, 0, 0.10, 0.05, 0.02, 0.20);
+    const sp = calculateSellingPrice(0, 100, 0.10, 0.05, 0.02, 0.20);
     expect(sp).toBeCloseTo(158.73, 2);
   });
 
@@ -111,10 +111,10 @@ describe('Pricing Engine', () => {
     // Total Deductions: 0.3 + 0.1 + 0.05 + 0.05 = 0.5
     // Selling Price = 50 / (1 - 0.5) = 100
     
-    const sp = calculateSellingPrice(50, 0, 0.1, 0.05, 0.05, 0.3);
+    const sp = calculateSellingPrice(0, 50, 0.1, 0.05, 0.05, 0.3);
     expect(sp).toBe(100);
     
     // Invalid deductions (>= 100%)
-    expect(calculateSellingPrice(50, 0, 0.5, 0.5, 0.1, 0.1)).toBe(0);
+    expect(calculateSellingPrice(0, 50, 0.5, 0.5, 0.1, 0.1)).toBe(0);
   });
 });

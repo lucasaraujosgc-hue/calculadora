@@ -88,3 +88,13 @@ export const webhookEvents = pgTable('webhook_events', {
   processedAt: timestamp('processed_at'),
   errorMessage: text('error_message'),
 });
+
+export const snapshots = pgTable('snapshots', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  custoFixoTotal: doublePrecision('custo_fixo_total').default(0).notNull(),
+  produtos: jsonb('produtos').notNull(),
+  custosFixos: jsonb('custos_fixos').notNull(),
+  label: text('label')
+});

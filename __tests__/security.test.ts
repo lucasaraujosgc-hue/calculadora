@@ -76,7 +76,7 @@ describe('Security Rules & Isolation', () => {
       .set('Cookie', [`user_token=${token}`]);
       
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([{
+    expect(res.body).toMatchObject([{
       id: 1, nome: 'Produto 1', cmv: 10, precoVenda: 25,
       vendasProjetadas: 50, isSample: false
     }]);

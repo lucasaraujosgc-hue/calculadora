@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine } from 'recharts';
-import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Percent, Target, Box, FileText, Info, Edit2, Check, X } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Percent, Target, Box, FileText, Info, Edit2, Check, X, AlertTriangle } from 'lucide-react';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
 import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
@@ -16,11 +17,12 @@ export default function Dashboard() {
 
   let receitaEstimada = 0;
   let margemContribuicaoTotal = 0;
-  let lucroLiquidoTotal = 0;
   
   let custosVariaveisTotais = 0;
   let impostoValorTotal = 0;
   let taxasComissoesValorTotal = 0;
+
+  const mcUnitMap: Record<string, number> = {};
 
   produtos.forEach(p => {
     const vendas = p.vendasProjetadas || 0;
@@ -53,16 +55,22 @@ export default function Dashboard() {
     
     const valorImposto = preco * (imposto / 100);
     const valorTaxasCom = preco * ((taxa + com) / 100);
-    const valorLucro = preco * (margemReal / 100);
     
     impostoValorTotal += valorImposto * vendas;
     taxasComissoesValorTotal += valorTaxasCom * vendas;
-    lucroLiquidoTotal += valorLucro * vendas;
     
     const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom;
+    mcUnitMap[p.id] = margemContribuicao;
     
     margemContribuicaoTotal += margemContribuicao * vendas;
   });
+
+  const lucroLiquidoTotal = margemContribuicaoTotal - custoFixoTotal;
+  const totalRateio = produtos.filter(p => p.cmv > 0).reduce((acc, p) => acc + (p.percentualRateio || 0), 0);
+  const rateioDiff = Math.abs(100 - totalRateio);
+  const isRateioIncompleto = rateioDiff > 0.1 && totalRateio < 100;
+  const isRateioExcedido = rateioDiff > 0.1 && totalRateio > 100;
+
 
   const despesasVariaveisTotal = impostoValorTotal + taxasComissoesValorTotal;
 
@@ -96,6 +104,8 @@ export default function Dashboard() {
 
   // Simulador de Meta de Lucro
   const fatorMeta = margemContribuicaoTotal > 0 ? (custoFixoTotal + metaLucro) / margemContribuicaoTotal : 0;
+  const gapSimulador = (custoFixoTotal + metaLucro) - margemContribuicaoTotal;
+  const somaMCUnits = produtos.reduce((acc, p) => acc + (mcUnitMap[p.id] || 0), 0);
 
   const handleSaveEdit = (p: ProdutoItem) => {
     saveProduto({ ...p, vendasProjetadas: editVendas });
@@ -110,6 +120,23 @@ export default function Dashboard() {
           <p className="text-muted-foreground mt-1 text-sm">Visão geral real baseada nos seus cadastros.</p>
         </div>
       </div>
+
+      {(isRateioIncompleto || isRateioExcedido) && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-lg flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+             <p className="text-sm font-medium">
+               {isRateioExcedido
+                 ? `Rateio excedido: ${totalRateio.toFixed(2)}% distribuído (${(totalRateio - 100).toFixed(2)}% acima do total).` 
+                 : `⚠️ Rateio de custo fixo incompleto: ${totalRateio.toFixed(2)}% distribuído (faltam ${(100 - totalRateio).toFixed(2)}%).`
+               } Os valores abaixo podem não refletir o resultado real até o rateio ser ajustado na tela de Mix e Preço em Lote.
+             </p>
+             <Link to="/mix-preco-lote" className="text-sm font-semibold underline mt-2 inline-block hover:text-amber-900">
+               Ajustar Mix de Preços
+             </Link>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -186,13 +213,31 @@ export default function Dashboard() {
       
       {/* SIMULADOR DE META DE LUCRO */}
       <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
-         <div className="mb-6">
-            <h3 className="font-serif text-lg text-primary flex items-center gap-2">
-              <Target className="w-5 h-5" /> Simulador de Meta de Lucro
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Informe o lucro líquido desejado no mês para descobrir a quantidade de vendas necessária de cada produto.
-            </p>
+         <div className="mb-6 flex flex-col md:flex-row md:items-start justify-between gap-4">
+            <div>
+              <h3 className="font-serif text-lg text-primary flex items-center gap-2">
+                <Target className="w-5 h-5" /> Simulador de Meta de Lucro
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Informe o lucro líquido desejado no mês para descobrir a quantidade de vendas necessária de cada produto.
+              </p>
+            </div>
+            {metaLucro > 0 && (
+              <div className="flex bg-muted/50 p-1 rounded-md border border-border shrink-0">
+                <button
+                  onClick={() => setModoSimulador('proporcional')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-sm transition-colors ${modoSimulador === 'proporcional' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-primary'}`}
+                >
+                  Proporcional
+                </button>
+                <button
+                  onClick={() => setModoSimulador('inteligente')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-sm transition-colors ${modoSimulador === 'inteligente' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-primary'}`}
+                >
+                  Inteligente
+                </button>
+              </div>
+            )}
          </div>
          
          <div className="max-w-xs mb-6">
@@ -221,7 +266,15 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {produtos.map(p => {
-                    const sugerido = Math.ceil((p.vendasProjetadas || 0) * fatorMeta);
+                    let sugerido = 0;
+                    if (modoSimulador === 'proporcional') {
+                      sugerido = Math.ceil((p.vendasProjetadas || 0) * fatorMeta);
+                    } else {
+                      const mcUnit = mcUnitMap[p.id] || 0;
+                      const pesoMC = somaMCUnits > 0 ? mcUnit / somaMCUnits : 0;
+                      const vendasExtras = (mcUnit > 0 && gapSimulador > 0) ? (gapSimulador / mcUnit) * pesoMC : 0;
+                      sugerido = Math.ceil((p.vendasProjetadas || 0) + Math.max(0, vendasExtras));
+                    }
                     const isEditing = editingId === p.id;
                     
                     return (

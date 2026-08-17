@@ -104,8 +104,8 @@ export function calculateOperatingResult(
  * Preço = Custo / (1 - (Impostos + Taxas + Comissões + Margem Desejada))
  */
 export function calculateSellingPrice(
-  unitFixedCost: number,
   costPrice: number,
+  unitFixedCost: number,
   taxesPercent: number,
   feesPercent: number,
   comissionPercent: number,
