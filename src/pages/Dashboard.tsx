@@ -5,6 +5,7 @@ import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Perc
 import { useAppContext, ProdutoItem } from '../context/AppContext';
 import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
+import { exportToExcel } from '../utils/export';
 
 export default function Dashboard() {
   const { produtos, custosFixos, saveProduto, snapshots, createSnapshot } = useAppContext();
@@ -260,7 +261,7 @@ export default function Dashboard() {
           <p className="text-muted-foreground mt-1 text-sm">Visão geral real baseada nos seus cadastros.</p>
         </div>
         <div className="flex gap-2">
-           <button onClick={() => exportExcel(true)} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
+           <button onClick={() => exportToExcel(true, produtos, receitaEstimada, custoFixoTotal, custosVariaveisTotais, despesasVariaveisTotal, margemContribuicaoTotal, lucroLiquidoTotal, pontoEquilibrioFaturamento, mcUnitMap)} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
              <FileText className="w-4 h-4"/> Excel
            </button>
            <button onClick={() => window.print()} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
@@ -434,8 +435,11 @@ export default function Dashboard() {
                       sugerido = Math.ceil((p.vendasProjetadas || 0) * fatorMeta);
                     } else {
                       const mcUnit = mcUnitMap[p.id] || 0;
-                      const pesoMC = somaMCUnits > 0 ? mcUnit / somaMCUnits : 0;
-                      const vendasExtras = (mcUnit > 0 && gapSimulador > 0) ? (gapSimulador / mcUnit) * pesoMC : 0;
+                      const totalVendasAtuais = produtos.reduce((acc, prod) => acc + (prod.vendasProjetadas || 0), 0);
+                      const vendas = p.vendasProjetadas || 0;
+                      const pesoDistribuicao = totalVendasAtuais > 0 ? vendas / totalVendasAtuais : 0;
+                      const metaMargemProduto = gapSimulador * pesoDistribuicao;
+                      const vendasExtras = (mcUnit > 0 && gapSimulador > 0) ? metaMargemProduto / mcUnit : 0;
                       sugerido = Math.ceil((p.vendasProjetadas || 0) + Math.max(0, vendasExtras));
                     }
                     const isEditing = editingId === p.id;

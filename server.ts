@@ -10,6 +10,7 @@ import nodemailer from "nodemailer";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { db } from "./src/db/index.js";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots } from "./src/db/schema.js";
 import { eq, and, gte, desc } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
@@ -467,7 +468,7 @@ app.put("/api/fixed-costs/:id", requireUser, async (req: any, res) => {
 app.delete("/api/fixed-costs/:id", requireUser, async (req: any, res) => {
   await db.delete(fixedCosts).where(and(eq(fixedCosts.id, req.params.id as any), eq(fixedCosts.userId, req.currentUser.id)));
   res.json({ success: true });
-
+});
 
 // --- Snapshots ---
 app.get("/api/snapshots", requireUser, async (req: any, res) => {
@@ -542,7 +543,6 @@ app.post("/api/snapshots", requireUser, async (req: any, res) => {
     console.error("Erro ao salvar snapshot:", error);
     res.status(500).json({ error: "Erro interno no servidor." });
   }
-});
 });
 
 async function checkProductLimit(req: any, res: any, next: any) {
@@ -963,7 +963,7 @@ async function setupVite() {
     // Run migrations on startup
     
     try {
-      
+      await migrate(db, { migrationsFolder: "drizzle" });
     } catch (err) {
       console.error("Falha crítica ao rodar as migrations do banco de dados. Encerrando o processo.", err);
       if (process.env.NODE_ENV === "production") {

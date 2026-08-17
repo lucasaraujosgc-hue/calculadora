@@ -23,6 +23,8 @@ import {
 import { useAppContext, ProdutoItem } from '../context/AppContext';
 import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
+import { exportToExcel } from '../utils/export';
+import { FileText } from 'lucide-react';
 
 type SortKey =
   | 'nome' | 'cmv' | 'vendas' | 'rateio' | 'imposto' | 'taxaCartao'
@@ -391,10 +393,92 @@ export default function MixPrecoLote() {
 
   return (
     <div className="space-y-6 pb-12">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
       <div>
         <h1 className="text-2xl sm:text-3xl font-serif text-primary">Mix de Preços em Lote</h1>
         <p className="text-muted-foreground mt-1 text-sm">Visualize e edite as variáveis de formação de preço de todos os produtos de uma só vez — mesmo com dezenas ou centenas de itens.</p>
       </div>
+      <div className="flex gap-2">
+         <button onClick={() => {
+            const custoFixoTotal = custosFixos.reduce((a, b) => a + b.valor, 0);
+            const custosVariaveisTotais = produtos.reduce((a, p) => a + ((p.cmv || 0) * (p.vendasProjetadas || 0)), 0);
+            const receitaEstimada = produtos.reduce((a, p) => {
+               const imposto = p.imposto || 0;
+               const taxaCartao = p.taxaCartao || 0;
+               const comissao = p.comissao || 0;
+               const margem = p.margem || 0;
+               let precoVenda = p.precoFixo || 0;
+               if (p.modoPrecificacao === 'margem') {
+                  const custoVariavelPercent = imposto + taxaCartao + comissao + margem;
+                  if (custoVariavelPercent < 100) {
+                     precoVenda = (p.cmv || 0) / (1 - custoVariavelPercent / 100);
+                  }
+               }
+               return a + (precoVenda * (p.vendasProjetadas || 0));
+            }, 0);
+            const despesasVariaveisTotal = produtos.reduce((a, p) => {
+               const imposto = p.imposto || 0;
+               const taxaCartao = p.taxaCartao || 0;
+               const comissao = p.comissao || 0;
+               const margem = p.margem || 0;
+               let precoVenda = p.precoFixo || 0;
+               if (p.modoPrecificacao === 'margem') {
+                  const custoVariavelPercent = imposto + taxaCartao + comissao + margem;
+                  if (custoVariavelPercent < 100) {
+                     precoVenda = (p.cmv || 0) / (1 - custoVariavelPercent / 100);
+                  }
+               }
+               const despesasPercent = (imposto + taxaCartao + comissao) / 100;
+               return a + (precoVenda * despesasPercent * (p.vendasProjetadas || 0));
+            }, 0);
+            const margemContribuicaoTotal = receitaEstimada - custosVariaveisTotais - despesasVariaveisTotal;
+            const lucroLiquidoTotal = margemContribuicaoTotal - custoFixoTotal;
+            const percMargemContribuicao = receitaEstimada > 0 ? (margemContribuicaoTotal / receitaEstimada) : 0;
+            const pontoEquilibrioFaturamento = percMargemContribuicao > 0 ? (custoFixoTotal / percMargemContribuicao) : 0;
+            
+            const mcUnitMap: Record<string, number> = {};
+            produtos.forEach(p => {
+               const imposto = p.imposto || 0;
+               const taxaCartao = p.taxaCartao || 0;
+               const comissao = p.comissao || 0;
+               const margem = p.margem || 0;
+               let precoVenda = p.precoFixo || 0;
+               if (p.modoPrecificacao === 'margem') {
+                  const custoVariavelPercent = imposto + taxaCartao + comissao + margem;
+                  if (custoVariavelPercent < 100) {
+                     precoVenda = (p.cmv || 0) / (1 - custoVariavelPercent / 100);
+                  }
+               }
+               const res = calculateContributionMargin({
+                  salePrice: precoVenda,
+                  costPrice: p.cmv,
+                  taxesPercent: (p.imposto || 0) / 100,
+                  feesPercent: (p.taxaCartao || 0) / 100,
+                  comissionPercent: (p.comissao || 0) / 100
+               });
+               mcUnitMap[p.id] = res;
+            });
+            
+            exportToExcel(
+               false, 
+               produtos, 
+               receitaEstimada, 
+               custoFixoTotal, 
+               custosVariaveisTotais, 
+               despesasVariaveisTotal, 
+               margemContribuicaoTotal, 
+               lucroLiquidoTotal, 
+               pontoEquilibrioFaturamento, 
+               mcUnitMap
+            );
+         }} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
+           <FileText className="w-4 h-4"/> Excel
+         </button>
+         <button onClick={() => window.print()} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
+           <FileText className="w-4 h-4"/> PDF
+         </button>
+      </div>
+    </div>
 
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Main Content Area */}

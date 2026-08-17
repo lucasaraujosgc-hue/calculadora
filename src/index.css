@@ -61,3 +61,37 @@
 @utility text-serif {
   font-family: var(--font-serif);
 }
+
+@media print {
+  /* Hide sidebar and navigation elements */
+  nav, aside, .sidebar, header {
+    display: none !important;
+  }
+  
+  /* Reset background colors and adjust layout for printing */
+  body, main, .pb-12 {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Make sure main content takes full width */
+  main {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  /* Hide buttons meant for screen interaction */
+  button, .print-hidden, a[href^="/"] {
+    display: none !important;
+  }
+  
+  /* Remove shadows and borders that don't print well */
+  .shadow-sm, .shadow-md, .shadow-lg {
+    box-shadow: none !important;
+  }
+  
+  .border {
+    border-color: #e5e7eb !important;
+  }
+}
