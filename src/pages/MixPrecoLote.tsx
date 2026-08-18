@@ -61,12 +61,12 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'margem', label: 'Margem (%)' },
 ];
 
-const PriceInput = ({ 
-  p, 
-  onUpdate 
-}: { 
-  p: any, 
-  onUpdate: (id: string, updates: Partial<ProdutoItem>) => void 
+const PriceInput = ({
+  p,
+  onUpdate
+}: {
+  p: any,
+  onUpdate: (id: string, updates: Partial<ProdutoItem>) => void
 }) => {
   const [val, setVal] = useState<string>(
     p.modoPrecificacao === 'preco' ? String(p.precoFixo || '') : p.preco.toFixed(2)
@@ -179,10 +179,10 @@ export default function MixPrecoLote() {
     const despesasVariaveisPerc = imposto + taxaCartao + comissao;
     const precoSugerido = calculateSellingPrice(p.cmv, custoFixoUnitario, imposto/100, taxaCartao/100, comissao/100, margem/100);
     const valorMargemSugerido = precoSugerido * (margem / 100);
-    
+
     let preco = 0;
     let margemReal = margem;
-    
+
     if (p.modoPrecificacao === 'preco') {
       preco = p.precoFixo || 0;
       const custoTot = p.cmv + custoFixoUnitario;
@@ -289,16 +289,16 @@ export default function MixPrecoLote() {
   const distribuirIgualmenteNow = () => {
     const limite = Number(minRateioValor) || 0;
     const elegiveis = validProdutos.filter(p => p.cmv >= limite);
-    
+
     if (elegiveis.length === 0) {
       alert("Nenhum produto atinge o valor mínimo para rateio.");
       return;
     }
-    
+
     const fatia = 100 / elegiveis.length;
     const ultimoValidoId = elegiveis[elegiveis.length - 1]?.id;
     let somaFatias = 0;
-    
+
     const updated = produtos.map(p => {
       // Se não é válido ou não atingiu o mínimo, zera o rateio
       if (!elegiveis.find(v => v.id === p.id)) {
@@ -306,7 +306,7 @@ export default function MixPrecoLote() {
         // Vamos zerar todos que não são elegíveis, já que 100% foi dividido entre os elegíveis.
         return { ...p, percentualRateio: 0 };
       }
-      
+
       let percentual: number;
       if (p.id === ultimoValidoId) {
         percentual = Number((100 - somaFatias).toFixed(4));
@@ -331,8 +331,20 @@ export default function MixPrecoLote() {
   // rateio hoje parecerem "gerar mais receita/lucro" só por causa disso, e tenderem a receber ainda
   // mais rateio a cada nova aplicação (efeito bola de neve). Produtos com preço fixo definido pelo
   // usuário (modoPrecificacao === 'preco') já são naturalmente imunes a esse ciclo.
+  //
+  // Também respeita o mesmo "valor mínimo de CMV para ratear" usado em "Distribuir igual":
+  // produtos abaixo do limite ficam de fora do cálculo dos índices e recebem 0% de rateio;
+  // os 100% são divididos apenas entre os produtos elegíveis.
   const distribuirInteligentemente = (pesosAtuais: { vendas: number; receita: number; lucro: number }) => {
     if (validProdutos.length === 0) return;
+
+    const limite = Number(minRateioValor) || 0;
+    const elegiveis = processedProdutos.filter(p => p.cmv >= limite);
+
+    if (elegiveis.length === 0) {
+      alert("Nenhum produto atinge o valor mínimo para rateio.");
+      return;
+    }
 
     const somaPesosInformados = pesosAtuais.vendas + pesosAtuais.receita + pesosAtuais.lucro;
     if (somaPesosInformados <= 0) {
@@ -345,10 +357,10 @@ export default function MixPrecoLote() {
     const wReceita = pesosAtuais.receita / somaPesosInformados;
     const wLucro = pesosAtuais.lucro / somaPesosInformados;
 
-    const n = processedProdutos.length;
+    const n = elegiveis.length;
 
     const baseById: Record<string, { precoBase: number; margemContribuicaoBase: number }> = {};
-    processedProdutos.forEach(p => {
+    elegiveis.forEach(p => {
       const despesasVariaveisPerc = p.imposto + p.taxaCartao + p.comissao;
       // Preço fixo definido pelo usuário já independe do rateio; caso contrário, recalcula
       // o preço "sem" custo fixo unitário só para medir o produto isoladamente.
@@ -363,7 +375,7 @@ export default function MixPrecoLote() {
     let totalReceita = 0;
     let totalLucroPositivo = 0;
 
-    processedProdutos.forEach(p => {
+    elegiveis.forEach(p => {
       const { precoBase, margemContribuicaoBase } = baseById[p.id];
       totalVendas += p.vendas;
       totalReceita += precoBase * p.vendas;
@@ -381,7 +393,7 @@ export default function MixPrecoLote() {
     const indicesPorId: Record<string, number> = {};
     let somaIndices = 0;
 
-    processedProdutos.forEach(p => {
+    elegiveis.forEach(p => {
       const { precoBase, margemContribuicaoBase } = baseById[p.id];
       const shareVendas = totalVendas > 0 ? p.vendas / totalVendas : 1 / n;
       const shareReceita = totalReceita > 0 ? (precoBase * p.vendas) / totalReceita : 1 / n;
@@ -394,11 +406,17 @@ export default function MixPrecoLote() {
     });
 
     let somaFatias = 0;
-    const ultimoProdutoId = processedProdutos[processedProdutos.length - 1]?.id;
+    const ultimoProdutoId = elegiveis[elegiveis.length - 1]?.id;
 
     const updated = produtos.map(p => {
       if (!validProdutos.find(v => v.id === p.id)) {
         return p;
+      }
+
+      // Produto válido mas fora dos elegíveis (abaixo do CMV mínimo definido) -> zera o rateio,
+      // igual ao comportamento de "Distribuir igual".
+      if (!elegiveis.find(v => v.id === p.id)) {
+        return { ...p, percentualRateio: 0 };
       }
 
       let percentual = 0;
@@ -517,7 +535,7 @@ export default function MixPrecoLote() {
             const lucroLiquidoTotal = margemContribuicaoTotal - custoFixoTotal;
             const percMargemContribuicao = receitaEstimada > 0 ? (margemContribuicaoTotal / receitaEstimada) : 0;
             const pontoEquilibrioFaturamento = percMargemContribuicao > 0 ? (custoFixoTotal / percMargemContribuicao) : 0;
-            
+
             const mcUnitMap: Record<string, number> = {};
             produtos.forEach(p => {
                const imposto = p.imposto || 0;
@@ -540,17 +558,17 @@ export default function MixPrecoLote() {
                });
                mcUnitMap[p.id] = res;
             });
-            
+
             exportToExcel(
-               false, 
-               produtos, 
-               receitaEstimada, 
-               custoFixoTotal, 
-               custosVariaveisTotais, 
-               despesasVariaveisTotal, 
-               margemContribuicaoTotal, 
-               lucroLiquidoTotal, 
-               pontoEquilibrioFaturamento, 
+               false,
+               produtos,
+               receitaEstimada,
+               custoFixoTotal,
+               custosVariaveisTotais,
+               despesasVariaveisTotal,
+               margemContribuicaoTotal,
+               lucroLiquidoTotal,
+               pontoEquilibrioFaturamento,
                mcUnitMap
             );
          }} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
@@ -568,7 +586,7 @@ export default function MixPrecoLote() {
           {/* Painel: Padronizar variáveis (aplicar/remover em massa) */}
           <div className="bg-card border-2 border-primary/40 rounded-xl shadow-md overflow-hidden relative">
           <div className="absolute top-0 right-0 left-0 h-1 bg-gradient-to-r from-primary/40 via-primary to-primary/40 opacity-70"></div>
-        <button 
+        <button
           onClick={() => setIsPadronizarOpen(!isPadronizarOpen)}
           className="w-full p-4 sm:p-6 border-b border-border bg-primary/5 flex items-center justify-between text-left transition-colors hover:bg-primary/10"
         >
@@ -801,7 +819,7 @@ export default function MixPrecoLote() {
                               >
                                 <Undo2 className="w-3 h-3" />
                               </button>
-                              
+
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1101,6 +1119,9 @@ export default function MixPrecoLote() {
                           placeholder="0,00"
                         />
                       </div>
+                      <span className="text-[10px] text-muted-foreground">
+                        Vale para os dois botões abaixo (Distribuir igual e Distribuir inteligente).
+                      </span>
                     </div>
                     <button
                       type="button"
