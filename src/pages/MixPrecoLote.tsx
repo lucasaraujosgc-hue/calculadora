@@ -75,8 +75,11 @@ const PriceInput = ({
   useEffect(() => {
     if (p.modoPrecificacao !== 'preco') {
       setVal(p.preco.toFixed(2));
+    } else {
+      // Quando for modo 'preco', temos que sincronizar caso o precoFixo mude por fora (ex: botões laterais)
+      setVal(String(p.precoFixo || ''));
     }
-  }, [p.modoPrecificacao, p.preco]);
+  }, [p.modoPrecificacao, p.preco, p.precoFixo]);
 
   return (
     <input
