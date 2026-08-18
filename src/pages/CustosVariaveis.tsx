@@ -66,6 +66,7 @@ export default function CustosVariaveis() {
       nome: editNome,
       cmv: Number(editCmv),
       vendasProjetadas: Number(editVendas) || 0,
+      precoVenda: Number(editPrecoVenda) || 0,
       precoFixo: Number(editPrecoVenda) || 0,
       modoPrecificacao: (Number(editPrecoVenda) > 0 ? 'preco' : p.modoPrecificacao) as 'preco' | 'margem'
     });
@@ -81,6 +82,7 @@ export default function CustosVariaveis() {
       nome: novoNome, 
       cmv: Number(novoCmv),
       vendasProjetadas: Number(vendasProjetadas) || 0,
+      precoVenda: Number(novoPrecoVenda) || 0,
       precoFixo: Number(novoPrecoVenda) || 0,
       modoPrecificacao: (Number(novoPrecoVenda) > 0 ? 'preco' : 'margem') as 'preco' | 'margem',
       imposto: 0,
@@ -234,7 +236,7 @@ export default function CustosVariaveis() {
             </div>
           )}
           
-          <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex flex-col md:flex-row flex-wrap items-end gap-4">
              <div className="flex-1">
                <label className="block text-xs font-medium text-muted-foreground mb-1">Nome</label>
                <input 
@@ -267,6 +269,17 @@ export default function CustosVariaveis() {
                  disabled={isLimitReached}
                  className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm disabled:opacity-50" 
                />
+             </div>
+             <div className="w-full md:w-48">
+               <label className="block text-xs font-medium text-muted-foreground mb-1">Preço Venda (R$)</label>
+               <input
+                  type="number" 
+                  placeholder="Ex: 99.90"
+                  value={novoPrecoVenda}
+                  onChange={e => setNovoPrecoVenda(e.target.value)}
+                  disabled={isLimitReached}
+                 className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50 text-sm disabled:opacity-50"
+                />
              </div>
              <div className="flex items-end gap-2">
                <button 

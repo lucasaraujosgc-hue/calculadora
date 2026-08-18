@@ -29,6 +29,7 @@ export type ProdutoItem = {
   percentualRateio?: number;
   modoPrecificacao?: 'margem' | 'preco';
   precoFixo?: number;
+  precoVenda?: number;
 };
 
 export type SnapshotItem = {

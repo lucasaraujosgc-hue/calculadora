@@ -12,6 +12,7 @@ import {
   Wand2,
   BrainCircuit,
   Undo2,
+  RefreshCw,
   AlertTriangle,
   CheckCircle2,
   TrendingUp,
@@ -110,6 +111,7 @@ export default function MixPrecoLote() {
   const [isPadronizarOpen, setIsPadronizarOpen] = useState(false);
 
   // Painel de pesos da distribuição inteligente (aberto ao clicar em "Distribuir inteligente")
+  const [minRateioValor, setMinRateioValor] = useState<number | ''>('');
   const [showPesoConfig, setShowPesoConfig] = useState(false);
   const [pesos, setPesos] = useState({ vendas: 30, receita: 30, lucro: 40 });
   const somaPesos = pesos.vendas + pesos.receita + pesos.lucro;
@@ -282,19 +284,28 @@ export default function MixPrecoLote() {
   );
 
   const distribuirIgualmenteNow = () => {
-    if (validProdutos.length === 0) return;
-    const fatia = 100 / validProdutos.length;
-    const ultimoValidoId = validProdutos[validProdutos.length - 1]?.id;
+    const limite = Number(minRateioValor) || 0;
+    const elegiveis = validProdutos.filter(p => p.cmv >= limite);
+    
+    if (elegiveis.length === 0) {
+      alert("Nenhum produto atinge o valor mínimo para rateio.");
+      return;
+    }
+    
+    const fatia = 100 / elegiveis.length;
+    const ultimoValidoId = elegiveis[elegiveis.length - 1]?.id;
     let somaFatias = 0;
+    
     const updated = produtos.map(p => {
-      // Produtos inválidos (cmv <= 0) não participam do rateio e ficam inalterados.
-      if (!validProdutos.find(v => v.id === p.id)) {
-        return p;
+      // Se não é válido ou não atingiu o mínimo, zera o rateio
+      if (!elegiveis.find(v => v.id === p.id)) {
+        // Só zerar os que eram válidos mas não elegíveis, ou todos inválidos?
+        // Vamos zerar todos que não são elegíveis, já que 100% foi dividido entre os elegíveis.
+        return { ...p, percentualRateio: 0 };
       }
+      
       let percentual: number;
       if (p.id === ultimoValidoId) {
-        // Último produto válido absorve o resto, evitando erro de arredondamento
-        // (soma diferente de 100% entre os produtos válidos).
         percentual = Number((100 - somaFatias).toFixed(4));
       } else {
         percentual = Number(fatia.toFixed(4));
@@ -774,19 +785,33 @@ export default function MixPrecoLote() {
                         <div className="flex flex-col items-center justify-center">
                           <div className="flex items-center gap-1">
                             <PriceInput p={p} onUpdate={handleUpdateProduto} />
-                            {p.modoPrecificacao === 'preco' && (
+                            <div className="flex flex-col gap-1 shrink-0">
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleUpdateProduto(p.id, { modoPrecificacao: 'margem' });
                                 }}
-                                className="inline-flex items-center justify-center w-6 h-6 rounded border border-amber-300 bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors shrink-0"
+                                disabled={p.modoPrecificacao !== 'preco'}
+                                className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-colors ${p.modoPrecificacao === 'preco' ? 'border-amber-300 bg-amber-50 text-amber-600 hover:bg-amber-100' : 'border-border bg-muted/50 text-muted-foreground/30'}`}
                                 title="Restaurar preço sugerido pela margem"
                               >
                                 <Undo2 className="w-3 h-3" />
                               </button>
-                            )}
+                              
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUpdateProduto(p.id, { modoPrecificacao: 'preco', precoFixo: p.precoVenda || 0 });
+                                }}
+                                disabled={!p.precoVenda || (p.modoPrecificacao === 'preco' && p.precoFixo === p.precoVenda)}
+                                className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-colors ${(!p.precoVenda || (p.modoPrecificacao === 'preco' && p.precoFixo === p.precoVenda)) ? 'border-border bg-muted/50 text-muted-foreground/30' : 'border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+                                title={`Restaurar valor de venda do cadastro${p.precoVenda ? `: ${formatCurrency(p.precoVenda)}` : ''}`}
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                              </button>
+                            </div>
                           </div>
                           <span className={`text-[10px] font-medium mt-1 ${p.valorMargem >= 0 ? 'text-primary' : 'text-red-600'}`}>
                             L.L: {formatCurrency(p.valorMargem)} ({p.margemReal.toFixed(1)}%)
@@ -1060,7 +1085,20 @@ export default function MixPrecoLote() {
                     </div>
                   )}
 
-                  <div className="flex flex-col gap-2 mt-3">
+                  <div className="flex flex-col gap-2 mt-4 border-t border-border pt-4">
+                    <div className="flex flex-col gap-1.5 mb-1 p-2.5 bg-muted/20 rounded-md border border-border">
+                      <span className="text-xs font-medium text-muted-foreground">Não ratear produtos com Custo (CMV) abaixo de:</span>
+                      <div className="relative w-full max-w-[120px]">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium">R$</span>
+                        <input
+                          type="number"
+                          value={minRateioValor}
+                          onChange={e => setMinRateioValor(e.target.value ? Number(e.target.value) : '')}
+                          className="w-full pl-7 pr-2 py-1.5 text-xs font-semibold border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
+                          placeholder="0,00"
+                        />
+                      </div>
+                    </div>
                     <button
                       type="button"
                       onClick={() => requestConfirm('distribuir-igual', distribuirIgualmenteNow)}
@@ -1070,7 +1108,7 @@ export default function MixPrecoLote() {
                           ? 'border-amber-400 bg-amber-500 text-white'
                           : 'border-border bg-background hover:bg-muted/50'
                       }`}
-                      title="Divide 100% igualmente entre todos os produtos"
+                      title="Divide 100% igualmente entre todos os produtos que atingirem o custo mínimo"
                     >
                       <Wand2 className="w-3.5 h-3.5" />
                       {confirmingAction === 'distribuir-igual' ? 'Confirmar?' : 'Distribuir igual'}
