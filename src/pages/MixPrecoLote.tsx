@@ -284,18 +284,39 @@ export default function MixPrecoLote() {
   const distribuirIgualmenteNow = () => {
     if (validProdutos.length === 0) return;
     const fatia = 100 / validProdutos.length;
-    const updated = produtos.map((p, idx) => ({
-      ...p,
-      percentualRateio: idx === validProdutos.length - 1
-        ? Number((100 - fatia * (validProdutos.length - 1)).toFixed(4))
-        : Number(fatia.toFixed(4)),
-    }));
+    const ultimoValidoId = validProdutos[validProdutos.length - 1]?.id;
+    let somaFatias = 0;
+    const updated = produtos.map(p => {
+      // Produtos inválidos (cmv <= 0) não participam do rateio e ficam inalterados.
+      if (!validProdutos.find(v => v.id === p.id)) {
+        return p;
+      }
+      let percentual: number;
+      if (p.id === ultimoValidoId) {
+        // Último produto válido absorve o resto, evitando erro de arredondamento
+        // (soma diferente de 100% entre os produtos válidos).
+        percentual = Number((100 - somaFatias).toFixed(4));
+      } else {
+        percentual = Number(fatia.toFixed(4));
+        somaFatias += percentual;
+      }
+      return { ...p, percentualRateio: percentual };
+    });
     setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
   };
 
   // Distribuição inteligente 100% client-side: calcula, para cada produto, um índice
   // ponderado a partir de 3 dimensões (participação nas vendas, na receita e na
   // capacidade de gerar lucro), com pesos ajustáveis pelo usuário no painel abaixo do botão.
+  //
+  // Importante: receita e margem de contribuição usadas no índice são recalculadas com um preço
+  // "base", ignorando o custo fixo unitário ATUAL (custoFixoUnitario = 0), e usadas apenas aqui —
+  // não substituem o preço/margem exibidos no restante da tela. Isso evita um ciclo vicioso:
+  // sem isso, o rateio já aplicado influencia o preço (via custo fixo unitário), o preço influencia
+  // receita/margem, e receita/margem influenciam o novo rateio — fazendo produtos que já têm mais
+  // rateio hoje parecerem "gerar mais receita/lucro" só por causa disso, e tenderem a receber ainda
+  // mais rateio a cada nova aplicação (efeito bola de neve). Produtos com preço fixo definido pelo
+  // usuário (modoPrecificacao === 'preco') já são naturalmente imunes a esse ciclo.
   const distribuirInteligentemente = (pesosAtuais: { vendas: number; receita: number; lucro: number }) => {
     if (validProdutos.length === 0) return;
 
@@ -312,16 +333,29 @@ export default function MixPrecoLote() {
 
     const n = processedProdutos.length;
 
+    const baseById: Record<string, { precoBase: number; margemContribuicaoBase: number }> = {};
+    processedProdutos.forEach(p => {
+      const despesasVariaveisPerc = p.imposto + p.taxaCartao + p.comissao;
+      // Preço fixo definido pelo usuário já independe do rateio; caso contrário, recalcula
+      // o preço "sem" custo fixo unitário só para medir o produto isoladamente.
+      const precoBase = p.modoPrecificacao === 'preco'
+        ? p.preco
+        : calculateSellingPrice(p.cmv, 0, p.imposto / 100, p.taxaCartao / 100, p.comissao / 100, p.margem / 100);
+      const margemContribuicaoBase = precoBase - p.cmv - (precoBase * despesasVariaveisPerc / 100);
+      baseById[p.id] = { precoBase, margemContribuicaoBase };
+    });
+
     let totalVendas = 0;
     let totalReceita = 0;
     let totalLucroPositivo = 0;
 
     processedProdutos.forEach(p => {
+      const { precoBase, margemContribuicaoBase } = baseById[p.id];
       totalVendas += p.vendas;
-      totalReceita += p.preco * p.vendas;
-      // Capacidade de gerar lucro = margem de contribuição total do produto (preço - custo variável) × vendas.
+      totalReceita += precoBase * p.vendas;
+      // Capacidade de gerar lucro = margem de contribuição total do produto (preço base - custo variável) × vendas.
       // Produtos com resultado negativo entram com 0 aqui para não "puxar" o índice para baixo.
-      totalLucroPositivo += Math.max(0, p.margemContribuicao * p.vendas);
+      totalLucroPositivo += Math.max(0, margemContribuicaoBase * p.vendas);
     });
 
     if (totalVendas === 0 && totalReceita === 0 && totalLucroPositivo === 0) {
@@ -334,9 +368,10 @@ export default function MixPrecoLote() {
     let somaIndices = 0;
 
     processedProdutos.forEach(p => {
+      const { precoBase, margemContribuicaoBase } = baseById[p.id];
       const shareVendas = totalVendas > 0 ? p.vendas / totalVendas : 1 / n;
-      const shareReceita = totalReceita > 0 ? (p.preco * p.vendas) / totalReceita : 1 / n;
-      const lucroPositivo = Math.max(0, p.margemContribuicao * p.vendas);
+      const shareReceita = totalReceita > 0 ? (precoBase * p.vendas) / totalReceita : 1 / n;
+      const lucroPositivo = Math.max(0, margemContribuicaoBase * p.vendas);
       const shareLucro = totalLucroPositivo > 0 ? lucroPositivo / totalLucroPositivo : 1 / n;
 
       const indice = shareVendas * wVendas + shareReceita * wReceita + shareLucro * wLucro;
