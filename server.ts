@@ -11,7 +11,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { db } from "./src/db/index.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots } from "./src/db/schema.js";
+import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots, store } from "./src/db/schema.js";
 import { eq, and, gte, desc } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -59,6 +59,25 @@ export const PLANS = {
   ilimitado: { id: "ilimitado", name: "Ilimitado", description: "Acesso total e suporte", priceCents: 5990, productLimit: Number.MAX_SAFE_INTEGER, excelImport: true, consultingCall: true }
 } as const;
 export type PlanId = keyof typeof PLANS;
+
+// --- Free mode toggle ---
+// Lets us take the paid option off the table temporarily (everyone gets
+// unlimited access) without deleting any of the payment code, so it can be
+// switched back on later. Users who register (or already exist) while this
+// is enabled are granted the 'ilimitado' plan directly in the database, so
+// they stay grandfathered with unlimited access even after free mode ends.
+const FREE_MODE_KEY = "freeMode";
+
+async function isFreeModeEnabled(): Promise<boolean> {
+  const rows = await db.select().from(store).where(eq(store.key, FREE_MODE_KEY));
+  return !!(rows[0]?.value as any)?.enabled;
+}
+
+// Público: lets the frontend know whether paid plans are currently active,
+// so it can hide pricing/checkout/limit nags during a free period.
+app.get("/api/settings", async (req, res) => {
+  res.json({ freeModeEnabled: await isFreeModeEnabled() });
+});
 
 // Público: única fonte de verdade sobre preços/limites dos planos, consumida
 // pela tela de preços no frontend para evitar duplicar (e desalinhar) esses
@@ -248,6 +267,21 @@ app.delete("/api/admin/users/:email", requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
+app.post("/api/admin/settings/free-mode", requireAdmin, async (req, res) => {
+  const enabled = !!req.body?.enabled;
+  await db.insert(store)
+    .values({ key: FREE_MODE_KEY, value: { enabled } })
+    .onConflictDoUpdate({ target: store.key, set: { value: { enabled } } });
+
+  if (enabled) {
+    // Grandfather every current registrant with unlimited access so they
+    // keep it even after payments are turned back on.
+    await db.update(users).set({ planId: "ilimitado" }).where(eq(users.role, "user"));
+  }
+
+  res.json({ success: true, freeModeEnabled: enabled });
+});
+
 app.get("/api/courses", async (req, res) => {
   const allCourses = await db.select().from(courses);
   res.json(allCourses);
@@ -276,14 +310,17 @@ app.post("/api/register", authLimiter, async (req, res) => {
     if (existing.length > 0) return res.status(400).json({ error: "E-mail já cadastrado" });
     const passwordHash = await bcrypt.hash(parsed.password, 10);
     const isBootstrapAdmin = !!process.env.ADMIN_EMAIL && parsed.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase();
-    
+    const freeMode = await isFreeModeEnabled();
+
     const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
     const newUser = await db.insert(users).values({
       name: parsed.name,
       email: parsed.email,
       passwordHash,
       role: isBootstrapAdmin ? 'admin' : 'user',
-      planId: isBootstrapAdmin ? 'ilimitado' : 'free',
+      // While free mode is on, new registrants are granted 'ilimitado'
+      // directly so they stay grandfathered once payments come back.
+      planId: (isBootstrapAdmin || freeMode) ? 'ilimitado' : 'free',
       verificationToken,
       isVerified: false
     }).returning();
@@ -633,6 +670,7 @@ app.post("/api/snapshots", requireUser, async (req: any, res) => {
 });
 
 async function checkProductLimit(req: any, res: any, next: any) {
+  if (await isFreeModeEnabled()) return next();
   const plan = PLANS[req.currentUser.planId as PlanId] || PLANS.basico;
   const userProducts = await db.select().from(products).where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
   if (userProducts.length >= plan.productLimit) {
@@ -756,6 +794,7 @@ app.delete("/api/products/:id", requireUser, async (req: any, res) => {
 });
 
 async function requireExcelImport(req: any, res: any, next: any) {
+  if (await isFreeModeEnabled()) return next();
   const plan = PLANS[req.currentUser.planId as PlanId] || PLANS.basico;
   if (!plan.excelImport) {
     return res.status(403).json({ error: "Seu plano atual não permite importação via Excel." });
@@ -895,6 +934,9 @@ app.post("/api/admin/users/:userId/products/import", requireAdmin, upload.single
 
 app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
   try {
+    if (await isFreeModeEnabled()) {
+      return res.status(400).json({ error: "Pagamentos estão temporariamente desativados. Sua conta já tem acesso ilimitado gratuito no momento." });
+    }
     const { planId } = req.body || {};
   if (!planId || !(planId in PLANS)) {
     return res.status(400).json({ error: "Plano inválido." });

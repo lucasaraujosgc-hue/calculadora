@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { formatCurrency } from '../utils/format';
 
 export default function CustosVariaveis() {
-  const { user, produtos, setProdutos, saveProduto, removeProduto, isGuest } = useAppContext();
+  const { user, produtos, setProdutos, saveProduto, removeProduto, isGuest, freeModeEnabled } = useAppContext();
   const [novoNome, setNovoNome] = useState('');
   const [novoCmv, setNovoCmv] = useState('');
   const [vendasProjetadas, setVendasProjetadas] = useState('');
@@ -21,7 +21,9 @@ export default function CustosVariaveis() {
   const [editPrecoVenda, setEditPrecoVenda] = useState('');
   const [novoPrecoVenda, setNovoPrecoVenda] = useState('');
 
-  const MAX_PRODUTOS = user ? (user.role === 'admin' || user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7)) : 5;
+  const MAX_PRODUTOS = freeModeEnabled
+    ? Infinity
+    : user ? (user.role === 'admin' || user.plan === 'ilimitado' ? Infinity : (user.productLimit || 7)) : 5;
   const isLimitReached = produtos.length >= MAX_PRODUTOS;
 
   const handleSort = (key: 'nome' | 'cmv' | 'vendasProjetadas' | 'precoFixo') => {
@@ -208,7 +210,7 @@ export default function CustosVariaveis() {
             <h3 className="text-lg font-medium text-foreground">Adicionar Produto/Serviço</h3>
             <div className="text-sm">
               <span className={isLimitReached ? 'text-red-500 font-bold' : 'text-muted-foreground'}>
-                {produtos.length} / {MAX_PRODUTOS} cadastrados
+                {Number.isFinite(MAX_PRODUTOS) ? `${produtos.length} / ${MAX_PRODUTOS} cadastrados` : `${produtos.length} cadastrados (sem limite)`}
               </span>
             </div>
           </div>

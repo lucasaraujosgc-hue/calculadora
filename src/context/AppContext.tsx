@@ -47,7 +47,8 @@ type AppContextType = {
   logout: () => void;
   isGuest: boolean;
   setGuestMode: (v: boolean) => void;
-  
+  freeModeEnabled: boolean;
+
   custosFixos: CustoFixoItem[];
   setCustosFixos: (cf: CustoFixoItem[]) => void;
   produtos: ProdutoItem[];
@@ -92,6 +93,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const sessionUser = sessionStorage.getItem('vc_user');
     return !(localUser || sessionUser);
   });
+
+  const [freeModeEnabled, setFreeModeEnabled] = useState<boolean>(false);
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(data => setFreeModeEnabled(!!data.freeModeEnabled))
+      .catch(() => {});
+  }, []);
 
   const [custosFixos, setCustosFixos] = useState<CustoFixoItem[]>(() => {
     const saved = localStorage.getItem('vc_custos') || sessionStorage.getItem('vc_custos');
@@ -316,8 +326,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ 
-      user, login, logout, isGuest, setGuestMode,
+    <AppContext.Provider value={{
+      user, login, logout, isGuest, setGuestMode, freeModeEnabled,
       custosFixos, setCustosFixos,
       produtos, setProdutos,
       saveProduto, removeProduto, syncProdutos,
