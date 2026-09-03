@@ -7,7 +7,7 @@ import { useAppContext } from '../context/AppContext';
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, isGuest, logout } = useAppContext();
+  const { user, isGuest, logout, freeModeEnabled } = useAppContext();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isDesktopMenuOpen, setIsDesktopMenuOpen] = useState(false);
 
@@ -19,7 +19,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { name: 'Formação de Preço', path: '/formacao-preco', icon: Calculator, highlight: 'bg-red-500/10 text-red-600 border-red-500/20' },
     // { name: 'Mix de Preços', path: '/mix-preco', icon: Box, highlight: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' },
     { name: 'Preços em Lote', path: '/mix-preco-lote', icon: Layers, highlight: 'bg-purple-500/10 text-purple-600 border-purple-500/20' },
-    ...(user ? [{ name: 'Planos e Upgrades', path: '/planos', icon: Star, highlight: 'bg-amber-500/10 text-amber-600 border-amber-500/20' }] : []),
+    ...(user && !freeModeEnabled ? [{ name: 'Planos e Upgrades', path: '/planos', icon: Star, highlight: 'bg-amber-500/10 text-amber-600 border-amber-500/20' }] : []),
     { name: 'Minha Conta', path: '/configuracoes', icon: Settings },
   ];
 

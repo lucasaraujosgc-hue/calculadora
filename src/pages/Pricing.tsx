@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Check, Star } from 'lucide-react';
+import { Check, Star, Gift } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
 export default function Pricing() {
-  const { user } = useAppContext();
+  const { user, freeModeEnabled } = useAppContext();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   const handleUpgrade = async (planId: string) => {
@@ -27,6 +27,18 @@ export default function Pricing() {
       setLoadingPlan(null);
     }
   };
+
+  if (freeModeEnabled) {
+    return (
+      <div className="py-12 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <Gift className="w-14 h-14 text-primary mx-auto mb-4" />
+        <h2 className="text-4xl font-serif text-foreground">Acesso gratuito e ilimitado</h2>
+        <p className="mt-4 text-lg text-muted-foreground">
+          Por tempo limitado, todos os cadastros têm acesso ilimitado à calculadora, sem custo. Aproveite!
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="py-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

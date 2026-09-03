@@ -1,15 +1,55 @@
 import React, { useEffect, useState } from 'react';
-import { Shield, Trash2, CheckCircle2, XCircle, UserCog, Settings, Plus, X, Upload } from 'lucide-react';
+import { Shield, Trash2, CheckCircle2, XCircle, UserCog, Settings, Plus, X, Upload, Gift } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
 export default function AdminPanel() {
   const { user } = useAppContext();
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [freeModeEnabled, setFreeModeEnabled] = useState(false);
+  const [loadingFreeMode, setLoadingFreeMode] = useState(true);
+  const [togglingFreeMode, setTogglingFreeMode] = useState(false);
+
+  const fetchFreeMode = () => {
+    setLoadingFreeMode(true);
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(data => setFreeModeEnabled(!!data.freeModeEnabled))
+      .catch(err => console.error(err))
+      .finally(() => setLoadingFreeMode(false));
+  };
 
   useEffect(() => {
     fetchUsers();
+    fetchFreeMode();
   }, []);
+
+  const handleToggleFreeMode = async () => {
+    const next = !freeModeEnabled;
+    const confirmMsg = next
+      ? 'Ativar o modo gratuito? Todos os usuários cadastrados (atuais e futuros, enquanto estiver ativo) passarão a ter acesso ilimitado e permanecerão com esse acesso mesmo depois que o modo gratuito for desativado.'
+      : 'Desativar o modo gratuito? Novos cadastros voltarão a precisar de um plano pago. Usuários que já tiveram acesso liberado continuarão ilimitados.';
+    if (!window.confirm(confirmMsg)) return;
+    setTogglingFreeMode(true);
+    try {
+      const res = await fetch('/api/admin/settings/free-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next })
+      });
+      if (res.ok) {
+        setFreeModeEnabled(next);
+        fetchUsers();
+      } else {
+        alert('Erro ao atualizar o modo gratuito.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro de conexão.');
+    } finally {
+      setTogglingFreeMode(false);
+    }
+  };
 
   
   const [selectedUser, setSelectedUser] = useState<any>(null);
@@ -205,6 +245,32 @@ export default function AdminPanel() {
           Painel Administrativo
         </h1>
         <p className="text-muted-foreground mt-1 text-sm">Gerencie os usuários cadastrados na plataforma.</p>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+        <div className="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <Gift className="w-6 h-6 text-amber-500 shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-lg font-bold text-foreground">Modo Gratuito</h2>
+              <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+                Enquanto ativo, os planos pagos ficam ocultos e todo cadastro (atual e novo) recebe acesso ilimitado.
+                Esses usuários permanecem com acesso ilimitado mesmo depois de desativar o modo gratuito.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleToggleFreeMode}
+            disabled={loadingFreeMode || togglingFreeMode}
+            className={`shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+              freeModeEnabled
+                ? 'bg-amber-500 text-white hover:bg-amber-600'
+                : 'border-2 border-primary text-primary hover:bg-primary/5'
+            }`}
+          >
+            {loadingFreeMode ? 'Carregando...' : togglingFreeMode ? 'Aguarde...' : freeModeEnabled ? 'Ativado — Desativar' : 'Desativado — Ativar'}
+          </button>
+        </div>
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
