@@ -220,7 +220,7 @@ export default function CustosVariaveis() {
               <Lock className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
               <div>
                 <p className="font-semibold mb-1">Limite atingido para visitantes</p>
-                <p className="mb-2">Visitantes podem cadastrar até 5 produtos. Para cadastrar até 7 produtos e salvar seus dados permanentemente, crie uma conta gratuita.</p>
+                <p className="mb-2">Visitantes podem cadastrar até 5 produtos. Para cadastrar mais produtos e salvar seus dados permanentemente, crie uma conta gratuita.</p>
                 <Link to="/auth" className="inline-block bg-amber-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-700 transition-colors">
                   Fazer Cadastro / Login
                 </Link>

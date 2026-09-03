@@ -302,12 +302,6 @@ export default function Dashboard() {
     setEditingId(null);
   };
 
-  const handleMetaLucroChange = (raw: string) => {
-    const val = Number(raw);
-    setMetaLucro(val);
-    if (val > 0) setMetaModalOpen(true);
-  };
-
   return (
     <div className="space-y-6 pb-12">
             <div className="flex justify-between items-end">
@@ -380,34 +374,36 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
-        <h3 className="font-serif text-lg text-primary flex items-center gap-2">
-          <Target className="w-5 h-5" /> Simulador de Meta de Lucro
-        </h3>
-        <p className="text-sm text-muted-foreground mt-1 mb-4">
-          Informe o lucro líquido desejado no mês para descobrir a quantidade de vendas necessária de cada produto.
-        </p>
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-          <div className="max-w-xs w-full">
-            <label className="block text-sm font-medium text-muted-foreground mb-1">
-              Lucro Líquido Desejado (R$)
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-red-50 border border-red-200 p-5 rounded-xl shadow-sm flex flex-col justify-between">
+          <div className="flex justify-between items-start mb-4">
+            <div className="p-2 rounded-lg bg-red-100 text-red-600">
+              <Target className="w-5 h-5" />
+            </div>
+            {metaLucro > 0 && (
+              <button
+                onClick={() => setMetaModalOpen(true)}
+                title="Ver vendas necessárias por produto"
+                className="p-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors"
+              >
+                <ArrowUpRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <div>
+            <label htmlFor="metaLucroInput" className="block text-sm font-medium text-red-800 mb-1">
+              Meta de Lucro Desejada
             </label>
             <input
+              id="metaLucroInput"
               type="number"
               value={metaLucro || ''}
-              onChange={(e) => handleMetaLucroChange(e.target.value)}
-              placeholder="Ex: 5000"
-              className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
+              onChange={(e) => setMetaLucro(Number(e.target.value))}
+              placeholder="R$ 0,00"
+              title="Informe o lucro líquido desejado no mês e clique no ícone para ver a quantidade de vendas necessária de cada produto."
+              className="w-full bg-transparent text-2xl font-bold text-red-700 placeholder:text-red-300 border-none focus:outline-none p-0"
             />
           </div>
-          {metaLucro > 0 && (
-            <button
-              onClick={() => setMetaModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-colors shrink-0"
-            >
-              <Target className="w-4 h-4" /> Ver vendas necessárias por produto
-            </button>
-          )}
         </div>
       </div>
 
