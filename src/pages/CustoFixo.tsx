@@ -5,8 +5,9 @@ import { useAppContext } from '../context/AppContext';
 import { formatCurrency } from '../utils/format';
 
 export default function CustoFixo() {
-  const { custosFixos, saveCustoFixo, removeCustoFixo } = useAppContext();
+  const { custosFixos, saveCustoFixo, removeCustoFixo, produtos } = useAppContext();
   const [quantidadeMensal, setQuantidadeMensal] = useState(1000);
+  const totalVendasProjetadas = produtos.reduce((acc, p) => acc + (p.vendasProjetadas || 0), 0);
   const [novoNome, setNovoNome] = useState('');
   const [novoValor, setNovoValor] = useState('');
 
@@ -98,12 +99,24 @@ export default function CustoFixo() {
             
             <div className="mb-6">
               <label className="block text-sm font-medium text-foreground mb-1">Volume Total de Vendas Projetadas (Unidades/mês)</label>
-              <input 
-                type="number" 
-                value={quantidadeMensal} 
-                onChange={e => setQuantidadeMensal(Number(e.target.value))} 
-                className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50" 
+              <input
+                type="number"
+                value={quantidadeMensal}
+                onChange={e => setQuantidadeMensal(Number(e.target.value))}
+                className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
               />
+              {totalVendasProjetadas > 0 && quantidadeMensal !== totalVendasProjetadas && (
+                <button
+                  type="button"
+                  onClick={() => setQuantidadeMensal(totalVendasProjetadas)}
+                  className="text-xs text-primary hover:underline mt-1"
+                >
+                  Usar soma das vendas projetadas dos meus produtos ({totalVendasProjetadas} un.)
+                </button>
+              )}
+              <p className="text-xs text-muted-foreground mt-2">
+                Esta é uma simulação independente: alterar este número aqui não muda o rateio de custo fixo usado nas telas de Formação de Preço e Mix de Preços, que somam automaticamente as vendas projetadas reais de cada produto cadastrado.
+              </p>
             </div>
 
             <div className="bg-primary border border-primary/20 p-6 rounded-xl text-primary-foreground shadow-sm mb-6">
