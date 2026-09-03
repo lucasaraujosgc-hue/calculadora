@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, LabelList } from 'recharts';
 import { Info } from 'lucide-react';
 import { formatCurrency } from '../utils/format';
 
@@ -528,6 +528,18 @@ export default function SimuladorImpostos() {
     impostoPercentual = aliquotaManualEfetiva;
   }
 
+  // Regime mais barato entre as opções reais (exclui "Manual", que é só uma
+  // referência digitada pelo usuário, e o MEI quando ele já não é elegível).
+  const regimeAtualLabel: Record<string, string> = { mei: 'MEI', simples: 'Simples Nacional', presumido: 'Lucro Presumido', manual: 'Manual' };
+  const regimesComparaveis = comparacaoRegimes.filter(r =>
+    r.regime !== 'Manual' && !(r.regime === 'MEI' && faturamentoAnual > LIMITE_ANUAL_MEI)
+  );
+  const melhorRegime = regimesComparaveis.length > 0
+    ? regimesComparaveis.reduce((min, r) => (r.imposto < min.imposto ? r : min))
+    : null;
+  const economiaVsAtual = melhorRegime ? custoMensal - melhorRegime.imposto : 0;
+  const mostrarEconomia = !!melhorRegime && melhorRegime.regime !== regimeAtualLabel[regime] && economiaVsAtual > 0.01;
+
   // Verifica se deve mostrar aviso de monofásico/substituição
   const mostrarAvisoMonofasico = regime === 'simples' && !temRedutorSimplesAtivo && (
     (anexo === 'Anexo I' || anexo === 'Anexo II') && faturamentoAnual <= LIMITE_FAIXA_1
@@ -1029,9 +1041,20 @@ export default function SimuladorImpostos() {
           {/* Gráfico de comparação entre regimes */}
           <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
             <h3 className="text-lg font-medium text-primary mb-4">Comparação entre Regimes Tributários</h3>
+
+            {mostrarEconomia && (
+              <div className="mb-4 flex items-start gap-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-4">
+                <Info className="w-5 h-5 shrink-0 mt-0.5" />
+                <p className="text-sm">
+                  <strong>{melhorRegime!.regime}</strong> é o regime mais barato para o seu faturamento hoje, custando {formatCurrency(melhorRegime!.imposto)}/mês.
+                  Você economizaria <strong>{formatCurrency(economiaVsAtual)}/mês</strong> em relação ao regime selecionado atualmente ({regimeAtualLabel[regime]}).
+                </p>
+              </div>
+            )}
+
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={comparacaoRegimes} layout="vertical" margin={{ top: 0, right: 30, left: 20, bottom: 0 }}>
+                <BarChart data={comparacaoRegimes} layout="vertical" margin={{ top: 0, right: 70, left: 20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                   <XAxis type="number" axisLine={false} tickLine={false} tickFormatter={v => `R$${v / 1000}k`} />
                   <YAxis dataKey="regime" type="category" axisLine={false} tickLine={false} width={110} />
@@ -1045,12 +1068,26 @@ export default function SimuladorImpostos() {
                     {comparacaoRegimes.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.cor} />
                     ))}
+                    <LabelList
+                      dataKey="imposto"
+                      position="right"
+                      content={(props: any) => {
+                        const { x, y, width, height, value } = props;
+                        const isBest = melhorRegime != null && Math.abs(value - melhorRegime.imposto) < 0.005;
+                        return (
+                          <text x={x + width + 8} y={y + height / 2} dy={4} fontSize={12} fontWeight={isBest ? 700 : 500} fill={isBest ? '#059669' : '#64748b'}>
+                            {formatCurrency(value)}{isBest ? ' 🏆' : ''}
+                          </text>
+                        );
+                      }}
+                    />
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
             <p className="text-xs text-muted-foreground mt-2 text-center">
               Barras representam o valor mensal de imposto (alíquota efetiva entre parênteses). O valor do Lucro Presumido inclui Patronal + RAT quando a folha é informada.
+              {melhorRegime && ' 🏆 marca o regime mais barato disponível para o seu faturamento.'}
             </p>
           </div>
         </div>
