@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { useAppContext } from '../context/AppContext';
 import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
+import CostCompositionChart from '../components/CostCompositionChart';
 
 export default function FormacaoPreco() {
   const { produtos, custosFixos, saveProduto } = useAppContext();
@@ -121,8 +122,6 @@ export default function FormacaoPreco() {
     { name: 'Taxas & Comissões', value: valorTaxa + valorComissao },
     { name: 'Lucro Líquido', value: valorMargem },
   ].map(item => ({ ...item, value: Number(item.value.toFixed(2)) }));
-
-  const COLORS = ['#94a3b8', '#8b5cf6', '#ef4444', '#f59e0b', '#10b981'];
 
   const chartData = [0, 0.5, 1, 1.5, 2].map(mult => {
     const qty = Math.round(peUnidades * mult);
@@ -334,38 +333,7 @@ export default function FormacaoPreco() {
 
           <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
             <h3 className="text-lg font-medium text-primary mb-4">Composição do Preço Ideal</h3>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={data}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {data.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => `${formatCurrency(value)}`} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4 mt-6">
-              {data.map((item, i) => (
-                <div key={i} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
-                    <span className="text-sm font-medium text-foreground">{item.name}</span>
-                  </div>
-                  <span className="text-sm font-bold text-foreground">{formatCurrency(item.value)}</span>
-                </div>
-              ))}
-            </div>
+            <CostCompositionChart data={data} size="md" legendLayout="grid-2" />
           </div>
         </div>
       </div>

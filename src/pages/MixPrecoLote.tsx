@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import {
   Search,
   X,
@@ -26,6 +25,7 @@ import { calculateSellingPrice } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 import { exportToExcel } from '../utils/export';
 import { FileText } from 'lucide-react';
+import CostCompositionChart from '../components/CostCompositionChart';
 
 type SortKey =
   | 'nome' | 'cmv' | 'vendas' | 'rateio' | 'imposto' | 'taxaCartao'
@@ -36,7 +36,6 @@ type FilterMode = 'todos' | 'sem-rateio' | 'prejuizo';
 type BulkField = 'margem' | 'taxaCartao' | 'imposto' | 'comissao';
 
 const ITEMS_PER_PAGE = 15;
-const COLORS = ['#94a3b8', '#8b5cf6', '#ef4444', '#f59e0b', '#10b981'];
 const CONFIRM_TIMEOUT_MS = 3500;
 
 const BULK_FIELD_META: Record<BulkField, { label: string; productKey: keyof ProdutoItem; icon: typeof TrendingUp }> = {
@@ -906,34 +905,7 @@ export default function MixPrecoLote() {
                             {/* Gráfico */}
                             <div className="col-span-1 lg:col-span-4 border border-border rounded-xl p-4 bg-background flex flex-col">
                               <p className="text-sm font-medium text-foreground mb-3 text-center">Composição do Preço</p>
-                              <div className="h-40 shrink-0">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <PieChart>
-                                    <Pie
-                                      data={data}
-                                      cx="50%"
-                                      cy="50%"
-                                      innerRadius={40}
-                                      outerRadius={70}
-                                      paddingAngle={2}
-                                      dataKey="value"
-                                    >
-                                      {data.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                      ))}
-                                    </Pie>
-                                    <Tooltip formatter={(value: number) => `${formatCurrency(value)}`} />
-                                  </PieChart>
-                                </ResponsiveContainer>
-                              </div>
-                              <div className="mt-4 grid grid-cols-2 gap-2">
-                                {data.map((item, i) => (
-                                  <div key={i} className="flex items-center gap-2 text-xs">
-                                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
-                                    <span className="truncate text-muted-foreground" title={item.name}>{item.name}</span>
-                                  </div>
-                                ))}
-                              </div>
+                              <CostCompositionChart data={data} size="sm" legendLayout="grid-2" showValues={false} />
                             </div>
                           </div>
                         </td>
@@ -988,38 +960,8 @@ export default function MixPrecoLote() {
       {validProdutos.length > 0 && (
         <div className="bg-card border border-border rounded-xl shadow-sm p-6 mt-6">
           <h2 className="text-xl font-bold text-foreground mb-4 text-center">Composição de Custos do Mix de Vendas</h2>
-          <div className="flex flex-col md:flex-row items-center gap-8">
-            <div className="w-full md:w-1/2 h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={dataGraficoTotal}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {dataGraficoTotal.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => `${formatCurrency(value)}`} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="w-full md:w-1/2 space-y-3">
-              {dataGraficoTotal.map((item, i) => (
-                <div key={i} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
-                    <span className="text-muted-foreground font-medium">{item.name}</span>
-                  </div>
-                  <span className="font-semibold text-foreground">{formatCurrency(item.value)}</span>
-                </div>
-              ))}
-            </div>
+          <div className="max-w-md mx-auto">
+            <CostCompositionChart data={dataGraficoTotal} size="lg" legendLayout="list" />
           </div>
         </div>
       )}
