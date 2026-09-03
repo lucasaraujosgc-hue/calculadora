@@ -1,11 +1,42 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine } from 'recharts';
+import { Tooltip as RechartsTooltip, ResponsiveContainer, Legend, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Percent, Target, Box, FileText, Info, Edit2, Check, X, AlertTriangle } from 'lucide-react';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
-import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
+import { calculateSellingPrice } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 import { exportToExcel } from '../utils/export';
+import CostCompositionChart from '../components/CostCompositionChart';
+
+// Recalcula faturamento e lucro líquido de um snapshot salvo (ou dos dados
+// atuais), usada tanto para a comparação "vs mês passado" quanto para a
+// série de Evolução Mensal — mesma fórmula usada no restante do dashboard.
+function calcSnapshotTotals(custoFixoTotalSnap: number, produtosSnap: ProdutoItem[]) {
+  let faturamento = 0;
+  let margemContribuicaoTotalSnap = 0;
+  produtosSnap.forEach(p => {
+    const vendas = p.vendasProjetadas || 0;
+    const imposto = p.imposto || 0;
+    const taxa = p.taxaCartao || 0;
+    const com = p.comissao || 0;
+    const margem = p.margem || 0;
+    const rateio = p.percentualRateio || 0;
+
+    const valorRateadoCF = (rateio / 100) * custoFixoTotalSnap;
+    const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
+
+    const preco = p.modoPrecificacao === 'preco'
+      ? (p.precoFixo || 0)
+      : calculateSellingPrice(p.cmv, custoFixoUnitario, imposto / 100, taxa / 100, com / 100, margem / 100);
+    faturamento += preco * vendas;
+
+    const valorImposto = preco * (imposto / 100);
+    const valorTaxasCom = preco * ((taxa + com) / 100);
+    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom;
+    margemContribuicaoTotalSnap += margemContribuicao * vendas;
+  });
+  return { faturamento, lucro: margemContribuicaoTotalSnap - custoFixoTotalSnap };
+}
 
 export default function Dashboard() {
   const { produtos, custosFixos, saveProduto, snapshots, createSnapshot } = useAppContext();
@@ -101,13 +132,15 @@ export default function Dashboard() {
   // Ponto de Equilibrio Global = Custo Fixo / Indice de Margem de Contribuicao (em Receita)
   const pontoEquilibrioFaturamento = percMargemContribuicao > 0 ? (custoFixoTotal / (percMargemContribuicao / 100)) : 0;
 
-  const pieData = [
-    { name: 'Custo Fixo', value: custoFixoTotal },
-    { name: 'Custo Variável (CMV)', value: custosVariaveisTotais },
-    { name: 'Despesas Variáveis', value: despesasVariaveisTotal },
-  ].filter(d => d.value > 0);
-
-  const COLORS = ['#94a3b8', '#f87171', '#fbbf24', '#34d399', '#60a5fa'];
+  // Mesma ordem/cores usadas em Formação de Preço e Mix de Preços para "para
+  // onde vai cada real" — ver CostCompositionChart.
+  const custoCompositionData = [
+    { name: 'Custo Variável (CMV)', value: Math.max(0, custosVariaveisTotais) },
+    { name: 'Custo Fixo', value: Math.max(0, custoFixoTotal) },
+    { name: 'Impostos', value: Math.max(0, impostoValorTotal) },
+    { name: 'Taxas & Comissões', value: Math.max(0, taxasComissoesValorTotal) },
+    { name: 'Lucro Líquido', value: Math.max(0, lucroLiquidoTotal) },
+  ].map(item => ({ ...item, value: Number(item.value.toFixed(2)) }));
 
   // Grafico de Ponto de Equilíbrio
   const peGrafico = [];
@@ -127,6 +160,30 @@ export default function Dashboard() {
   const fatorMeta = margemContribuicaoTotal > 0 ? (custoFixoTotal + metaLucro) / margemContribuicaoTotal : 0;
   const gapSimulador = (custoFixoTotal + metaLucro) - margemContribuicaoTotal;
 
+  // Produtos com maior gap entre vendas atuais e necessárias para bater a meta
+  // (top 8) — visão rápida de onde empurrar vendas, complementar à tabela abaixo.
+  const metaGraficoData = metaLucro > 0
+    ? produtos
+        .map(p => {
+          let sugerido: number;
+          if (modoSimulador === 'proporcional') {
+            sugerido = Math.ceil((p.vendasProjetadas || 0) * fatorMeta);
+          } else {
+            const mcUnit = mcUnitMap[p.id] || 0;
+            const totalVendasAtuais = produtos.reduce((acc, prod) => acc + (prod.vendasProjetadas || 0), 0);
+            const vendas = p.vendasProjetadas || 0;
+            const pesoDistribuicao = totalVendasAtuais > 0 ? vendas / totalVendasAtuais : 0;
+            const metaMargemProduto = gapSimulador * pesoDistribuicao;
+            const vendasExtras = (mcUnit > 0 && gapSimulador > 0) ? metaMargemProduto / mcUnit : 0;
+            sugerido = Math.ceil((p.vendasProjetadas || 0) + Math.max(0, vendasExtras));
+          }
+          return { nome: p.nome, atual: p.vendasProjetadas || 0, necessario: sugerido };
+        })
+        .filter(d => d.necessario > d.atual)
+        .sort((a, b) => (b.necessario - b.atual) - (a.necessario - a.atual))
+        .slice(0, 8)
+    : [];
+
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const previousSnapshots = snapshots.filter(s => new Date(s.createdAt) < startOfMonth);
@@ -138,38 +195,29 @@ export default function Dashboard() {
   let lastPercMargem = 0;
 
   if (lastMonthSnapshot) {
-    let lastMargemContribuicaoTotal = 0;
     lastCustoFixo = lastMonthSnapshot.custoFixoTotal;
-    
-    lastMonthSnapshot.produtos.forEach(p => {
-       const vendas = p.vendasProjetadas || 0;
-       const imposto = p.imposto || 0;
-       const taxa = p.taxaCartao || 0;
-       const com = p.comissao || 0;
-       const margem = p.margem || 0;
-       const rateio = p.percentualRateio || 0;
-       
-       const valorRateadoCF = (rateio / 100) * lastCustoFixo;
-       const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
-       
-       let preco = 0;
-       if (p.modoPrecificacao === 'preco') {
-         preco = p.precoFixo || 0;
-       } else {
-         preco = calculateSellingPrice(p.cmv, custoFixoUnitario, imposto/100, taxa/100, com/100, margem/100);
-       }
-       lastFaturamento += preco * vendas;
-       
-       const valorImposto = preco * (imposto / 100);
-       const valorTaxasCom = preco * ((taxa + com) / 100);
-       
-       const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom;
-       lastMargemContribuicaoTotal += margemContribuicao * vendas;
-    });
-
-    lastLucro = lastMargemContribuicaoTotal - lastCustoFixo;
+    const lastTotals = calcSnapshotTotals(lastCustoFixo, lastMonthSnapshot.produtos);
+    lastFaturamento = lastTotals.faturamento;
+    lastLucro = lastTotals.lucro;
+    const lastMargemContribuicaoTotal = lastLucro + lastCustoFixo;
     lastPercMargem = lastFaturamento > 0 ? (lastMargemContribuicaoTotal / lastFaturamento) * 100 : 0;
   }
+
+  // Evolução Mensal: um ponto por snapshot salvo (1 por mês, ver /api/snapshots)
+  // mais os dados atuais (ainda não salvos como snapshot deste mês).
+  const trendData = [...snapshots]
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    .map(s => {
+      const totals = calcSnapshotTotals(s.custoFixoTotal, s.produtos);
+      return {
+        label: s.label || new Date(s.createdAt).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
+        faturamento: totals.faturamento,
+        lucro: totals.lucro
+      };
+    });
+  const trendDataComAtual = trendData.length > 0
+    ? [...trendData, { label: 'Atual', faturamento: receitaEstimada, lucro: lucroLiquidoTotal }]
+    : [];
 
   const varFat = lastFaturamento > 0 ? ((receitaEstimada - lastFaturamento) / lastFaturamento) * 100 : 0;
   const varLuc = lastLucro !== 0 ? ((lucroLiquidoTotal - lastLucro) / Math.abs(lastLucro)) * 100 : 0;
@@ -302,6 +350,29 @@ export default function Dashboard() {
         </div>
       )}
 
+      <div className={`rounded-xl border p-6 shadow-sm ${lucroLiquidoTotal >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-full shrink-0 ${lucroLiquidoTotal >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+              <DollarSign className="w-7 h-7" />
+            </div>
+            <div>
+              <p className={`text-sm font-medium ${lucroLiquidoTotal >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>Lucro Líquido Estimado</p>
+              <div className="flex items-baseline gap-1">
+                <h2 className={`text-4xl font-bold ${lucroLiquidoTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(lucroLiquidoTotal)}</h2>
+                {renderVar(varLuc)}
+              </div>
+              <p className={`text-sm font-medium ${lucroLiquidoTotal >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{percLucroLiquido.toFixed(1)}% da receita</p>
+            </div>
+          </div>
+          <div className="sm:text-right sm:border-l sm:border-border sm:pl-6">
+            <p className="text-sm text-muted-foreground">Margem de Contribuição Total</p>
+            <p className="text-xl font-bold text-foreground">{formatCurrency(margemContribuicaoTotal)}</p>
+            <p className="text-xs text-muted-foreground">{percMargemContribuicao.toFixed(1)}% da receita — cobre custos fixos e gera este lucro</p>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { title: 'Faturamento Projetado', value: `${formatCurrency(receitaEstimada)}`, isPositive: true, icon: DollarSign },
@@ -326,21 +397,8 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-card border border-border p-6 rounded-xl shadow-sm lg:col-span-1">
-          <h3 className="font-serif text-lg mb-4 text-primary">Margens e Lucro Global</h3>
-          <div className="space-y-4">
-            <div className="p-4 bg-primary/5 rounded-lg border border-primary/20">
-               <p className="text-sm text-muted-foreground">Margem de Contribuição Total</p>
-               <h4 className="text-2xl font-bold text-primary">{formatCurrency(margemContribuicaoTotal)}</h4>
-               <p className="text-sm font-medium text-primary/80">{percMargemContribuicao.toFixed(1)}% da receita</p>
-               <p className="text-xs text-muted-foreground mt-2">Valor que sobra para pagar os custos fixos.</p>
-            </div>
-            <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
-               <p className="text-sm text-emerald-800">Lucro Líquido Estimado</p>
-               <h4 className="text-2xl font-bold text-emerald-600">{formatCurrency(lucroLiquidoTotal)}</h4>
-               <p className="text-sm font-medium text-emerald-600">{percLucroLiquido.toFixed(1)}% da receita</p>
-               <p className="text-xs text-emerald-700/70 mt-2">Valor livre após todos os custos e despesas.</p>
-            </div>
-          </div>
+          <h3 className="font-serif text-lg mb-4 text-primary">Composição de Custos</h3>
+          <CostCompositionChart data={custoCompositionData} size="md" legendLayout="list" />
         </div>
 
         <div className="bg-card border border-border p-6 rounded-xl shadow-sm lg:col-span-2">
@@ -374,7 +432,33 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-      
+
+      <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
+        <h3 className="font-serif text-lg mb-1 text-primary">Evolução Mensal</h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Faturamento e Lucro Líquido com base nos snapshots salvos automaticamente a cada mês, até os dados atuais.
+        </p>
+        {trendDataComAtual.length >= 2 ? (
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trendDataComAtual} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                <XAxis dataKey="label" style={{ fontSize: '12px' }} />
+                <YAxis tickFormatter={(val) => `R$ ${(val / 1000).toFixed(0)}k`} style={{ fontSize: '12px' }} />
+                <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
+                <Legend />
+                <Line type="monotone" dataKey="faturamento" name="Faturamento" stroke="#60a5fa" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="lucro" name="Lucro Líquido" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground text-center py-10">
+            Seu histórico mensal aparecerá aqui a partir do próximo mês de uso — um snapshot dos seus dados é salvo automaticamente uma vez por mês.
+          </p>
+        )}
+      </div>
+
       {/* SIMULADOR DE META DE LUCRO */}
       <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
          <div className="mb-6 flex flex-col md:flex-row md:items-start justify-between gap-4">
@@ -416,6 +500,25 @@ export default function Dashboard() {
               className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
             />
          </div>
+
+         {metaGraficoData.length > 0 && (
+           <div className="mb-6">
+             <div className="h-64">
+               <ResponsiveContainer width="100%" height="100%">
+                 <BarChart data={metaGraficoData} layout="vertical" margin={{ top: 0, right: 30, left: 10, bottom: 0 }}>
+                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                   <XAxis type="number" axisLine={false} tickLine={false} style={{ fontSize: '12px' }} />
+                   <YAxis dataKey="nome" type="category" axisLine={false} tickLine={false} width={110} style={{ fontSize: '12px' }} />
+                   <RechartsTooltip formatter={(v: number) => `${v} un`} />
+                   <Legend />
+                   <Bar dataKey="atual" name="Vendas Atuais" fill="#94a3b8" radius={[0, 4, 4, 0]} barSize={10} />
+                   <Bar dataKey="necessario" name="Vendas Necessárias" fill="#10b981" radius={[0, 4, 4, 0]} barSize={10} />
+                 </BarChart>
+               </ResponsiveContainer>
+             </div>
+             <p className="text-xs text-muted-foreground mt-2 text-center">Produtos com maior necessidade de aumento de vendas para atingir a meta (top 8).</p>
+           </div>
+         )}
 
          {metaLucro > 0 && (
            <div className="overflow-x-auto rounded-lg border border-border">
