@@ -42,6 +42,7 @@ export default function Dashboard() {
   const { produtos, custosFixos, saveProduto, snapshots, createSnapshot } = useAppContext();
 
   const [metaLucro, setMetaLucro] = useState<number>(0);
+  const [metaModalOpen, setMetaModalOpen] = useState<boolean>(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editVendas, setEditVendas] = useState<number>(0);
   const [modoSimulador, setModoSimulador] = useState<'proporcional' | 'inteligente'>('proporcional');
@@ -301,6 +302,12 @@ export default function Dashboard() {
     setEditingId(null);
   };
 
+  const handleMetaLucroChange = (raw: string) => {
+    const val = Number(raw);
+    setMetaLucro(val);
+    if (val > 0) setMetaModalOpen(true);
+  };
+
   return (
     <div className="space-y-6 pb-12">
             <div className="flex justify-between items-end">
@@ -370,6 +377,37 @@ export default function Dashboard() {
             <p className="text-xl font-bold text-foreground">{formatCurrency(margemContribuicaoTotal)}</p>
             <p className="text-xs text-muted-foreground">{percMargemContribuicao.toFixed(1)}% da receita — cobre custos fixos e gera este lucro</p>
           </div>
+        </div>
+      </div>
+
+      <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
+        <h3 className="font-serif text-lg text-primary flex items-center gap-2">
+          <Target className="w-5 h-5" /> Simulador de Meta de Lucro
+        </h3>
+        <p className="text-sm text-muted-foreground mt-1 mb-4">
+          Informe o lucro líquido desejado no mês para descobrir a quantidade de vendas necessária de cada produto.
+        </p>
+        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+          <div className="max-w-xs w-full">
+            <label className="block text-sm font-medium text-muted-foreground mb-1">
+              Lucro Líquido Desejado (R$)
+            </label>
+            <input
+              type="number"
+              value={metaLucro || ''}
+              onChange={(e) => handleMetaLucroChange(e.target.value)}
+              placeholder="Ex: 5000"
+              className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+          {metaLucro > 0 && (
+            <button
+              onClick={() => setMetaModalOpen(true)}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-colors shrink-0"
+            >
+              <Target className="w-4 h-4" /> Ver vendas necessárias por produto
+            </button>
+          )}
         </div>
       </div>
 
@@ -459,19 +497,32 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* SIMULADOR DE META DE LUCRO */}
-      <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
-         <div className="mb-6 flex flex-col md:flex-row md:items-start justify-between gap-4">
-            <div>
-              <h3 className="font-serif text-lg text-primary flex items-center gap-2">
-                <Target className="w-5 h-5" /> Simulador de Meta de Lucro
-              </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Informe o lucro líquido desejado no mês para descobrir a quantidade de vendas necessária de cada produto.
-              </p>
+      <div className="bg-primary/5 rounded-xl p-5 border border-primary/20">
+        <h3 className="text-primary font-medium flex items-center gap-2 mb-2">
+          <Info className="w-4 h-4" /> Como analisar seus indicadores
+        </h3>
+        <ul className="text-sm text-muted-foreground space-y-2 list-disc pl-5">
+          <li><strong>Ponto de Equilíbrio:</strong> É o momento em que a empresa "empata". Abaixo disso é prejuízo, acima é lucro.</li>
+          <li><strong>Margem de Contribuição:</strong> Mostra quanto cada venda contribui para pagar os custos fixos após descontar os custos variáveis (impostos, taxas, CMV).</li>
+          <li><strong>Simulador:</strong> Edite as vendas para testar cenários ou aplique as "Vendas Necessárias" para salvar no cadastro do produto automaticamente.</li>
+        </ul>
+      </div>
+
+      {metaModalOpen && metaLucro > 0 && (
+        <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4" onClick={() => setMetaModalOpen(false)}>
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-border flex justify-between items-start bg-card shrink-0">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2 text-primary"><Target className="w-5 h-5" /> Vendas Necessárias por Produto</h2>
+                <p className="text-sm text-muted-foreground mt-1">Meta: {formatCurrency(metaLucro)} de lucro líquido no mês.</p>
+              </div>
+              <button onClick={() => setMetaModalOpen(false)} className="p-2 hover:bg-muted rounded-full shrink-0">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            {metaLucro > 0 && (
-              <div className="flex bg-muted/50 p-1 rounded-md border border-border shrink-0">
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="flex bg-muted/50 p-1 rounded-md border border-border w-fit">
                 <button
                   onClick={() => setModoSimulador('proporcional')}
                   className={`px-3 py-1.5 text-xs font-medium rounded-sm transition-colors ${modoSimulador === 'proporcional' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-primary'}`}
@@ -485,118 +536,93 @@ export default function Dashboard() {
                   Inteligente
                 </button>
               </div>
-            )}
-         </div>
-         
-         <div className="max-w-xs mb-6">
-            <label className="block text-sm font-medium text-muted-foreground mb-1">
-              Lucro Líquido Desejado (R$)
-            </label>
-            <input 
-              type="number" 
-              value={metaLucro || ''}
-              onChange={(e) => setMetaLucro(Number(e.target.value))}
-              placeholder="Ex: 5000"
-              className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
-            />
-         </div>
 
-         {metaGraficoData.length > 0 && (
-           <div className="mb-6">
-             <div className="h-64">
-               <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={metaGraficoData} layout="vertical" margin={{ top: 0, right: 30, left: 10, bottom: 0 }}>
-                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                   <XAxis type="number" axisLine={false} tickLine={false} style={{ fontSize: '12px' }} />
-                   <YAxis dataKey="nome" type="category" axisLine={false} tickLine={false} width={110} style={{ fontSize: '12px' }} />
-                   <RechartsTooltip formatter={(v: number) => `${v} un`} />
-                   <Legend />
-                   <Bar dataKey="atual" name="Vendas Atuais" fill="#94a3b8" radius={[0, 4, 4, 0]} barSize={10} />
-                   <Bar dataKey="necessario" name="Vendas Necessárias" fill="#10b981" radius={[0, 4, 4, 0]} barSize={10} />
-                 </BarChart>
-               </ResponsiveContainer>
-             </div>
-             <p className="text-xs text-muted-foreground mt-2 text-center">Produtos com maior necessidade de aumento de vendas para atingir a meta (top 8).</p>
-           </div>
-         )}
+              {metaGraficoData.length > 0 && (
+                <div>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={metaGraficoData} layout="vertical" margin={{ top: 0, right: 30, left: 10, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                        <XAxis type="number" axisLine={false} tickLine={false} style={{ fontSize: '12px' }} />
+                        <YAxis dataKey="nome" type="category" axisLine={false} tickLine={false} width={110} style={{ fontSize: '12px' }} />
+                        <RechartsTooltip formatter={(v: number) => `${v} un`} />
+                        <Legend />
+                        <Bar dataKey="atual" name="Vendas Atuais" fill="#94a3b8" radius={[0, 4, 4, 0]} barSize={10} />
+                        <Bar dataKey="necessario" name="Vendas Necessárias" fill="#10b981" radius={[0, 4, 4, 0]} barSize={10} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2 text-center">Produtos com maior necessidade de aumento de vendas para atingir a meta (top 8).</p>
+                </div>
+              )}
 
-         {metaLucro > 0 && (
-           <div className="overflow-x-auto rounded-lg border border-border">
-             <table className="w-full text-sm text-left">
-                <thead className="text-xs text-muted-foreground uppercase bg-muted/50">
-                  <tr>
-                    <th className="px-4 py-3">Produto</th>
-                    <th className="px-4 py-3 text-right">Vendas Atuais</th>
-                    <th className="px-4 py-3 text-right text-primary">Vendas Necessárias (Meta)</th>
-                    <th className="px-4 py-3 text-center">Ação</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {produtos.map(p => {
-                    let sugerido = 0;
-                    if (modoSimulador === 'proporcional') {
-                      sugerido = Math.ceil((p.vendasProjetadas || 0) * fatorMeta);
-                    } else {
-                      const mcUnit = mcUnitMap[p.id] || 0;
-                      const totalVendasAtuais = produtos.reduce((acc, prod) => acc + (prod.vendasProjetadas || 0), 0);
-                      const vendas = p.vendasProjetadas || 0;
-                      const pesoDistribuicao = totalVendasAtuais > 0 ? vendas / totalVendasAtuais : 0;
-                      const metaMargemProduto = gapSimulador * pesoDistribuicao;
-                      const vendasExtras = (mcUnit > 0 && gapSimulador > 0) ? metaMargemProduto / mcUnit : 0;
-                      sugerido = Math.ceil((p.vendasProjetadas || 0) + Math.max(0, vendasExtras));
-                    }
-                    const isEditing = editingId === p.id;
-                    
-                    return (
-                      <tr key={p.id} className="border-t border-border hover:bg-muted/20">
-                        <td className="px-4 py-3 font-medium">{p.nome}</td>
-                        <td className="px-4 py-3 text-right">{p.vendasProjetadas || 0}</td>
-                        <td className="px-4 py-3 text-right font-bold text-primary">
-                          {isEditing ? (
-                             <input 
-                               type="number"
-                               value={editVendas}
-                               onChange={e => setEditVendas(Number(e.target.value))}
-                               className="w-20 px-2 py-1 border rounded text-right ml-auto"
-                             />
-                          ) : (
-                             sugerido
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {isEditing ? (
-                            <div className="flex justify-center gap-2">
-                              <button onClick={() => handleSaveEdit(p)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"><Check className="w-4 h-4"/></button>
-                              <button onClick={() => setEditingId(null)} className="p-1 text-red-600 hover:bg-red-50 rounded"><X className="w-4 h-4"/></button>
-                            </div>
-                          ) : (
-                            <button 
-                              onClick={() => { setEditingId(p.id!); setEditVendas(sugerido); }} 
-                              className="p-1 text-primary hover:bg-primary/10 rounded inline-flex items-center gap-1 text-xs font-medium"
-                            >
-                              <Edit2 className="w-3 h-3"/> Aplicar
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-             </table>
-           </div>
-         )}
-      </div>
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-sm text-left">
+                  <thead className="text-xs text-muted-foreground uppercase bg-muted/50">
+                    <tr>
+                      <th className="px-4 py-3">Produto</th>
+                      <th className="px-4 py-3 text-right">Vendas Atuais</th>
+                      <th className="px-4 py-3 text-right text-primary">Vendas Necessárias (Meta)</th>
+                      <th className="px-4 py-3 text-center">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {produtos.map(p => {
+                      let sugerido = 0;
+                      if (modoSimulador === 'proporcional') {
+                        sugerido = Math.ceil((p.vendasProjetadas || 0) * fatorMeta);
+                      } else {
+                        const mcUnit = mcUnitMap[p.id] || 0;
+                        const totalVendasAtuais = produtos.reduce((acc, prod) => acc + (prod.vendasProjetadas || 0), 0);
+                        const vendas = p.vendasProjetadas || 0;
+                        const pesoDistribuicao = totalVendasAtuais > 0 ? vendas / totalVendasAtuais : 0;
+                        const metaMargemProduto = gapSimulador * pesoDistribuicao;
+                        const vendasExtras = (mcUnit > 0 && gapSimulador > 0) ? metaMargemProduto / mcUnit : 0;
+                        sugerido = Math.ceil((p.vendasProjetadas || 0) + Math.max(0, vendasExtras));
+                      }
+                      const isEditing = editingId === p.id;
 
-      <div className="bg-primary/5 rounded-xl p-5 border border-primary/20">
-        <h3 className="text-primary font-medium flex items-center gap-2 mb-2">
-          <Info className="w-4 h-4" /> Como analisar seus indicadores
-        </h3>
-        <ul className="text-sm text-muted-foreground space-y-2 list-disc pl-5">
-          <li><strong>Ponto de Equilíbrio:</strong> É o momento em que a empresa "empata". Abaixo disso é prejuízo, acima é lucro.</li>
-          <li><strong>Margem de Contribuição:</strong> Mostra quanto cada venda contribui para pagar os custos fixos após descontar os custos variáveis (impostos, taxas, CMV).</li>
-          <li><strong>Simulador:</strong> Edite as vendas para testar cenários ou aplique as "Vendas Necessárias" para salvar no cadastro do produto automaticamente.</li>
-        </ul>
-      </div>
+                      return (
+                        <tr key={p.id} className="border-t border-border hover:bg-muted/20">
+                          <td className="px-4 py-3 font-medium">{p.nome}</td>
+                          <td className="px-4 py-3 text-right">{p.vendasProjetadas || 0}</td>
+                          <td className="px-4 py-3 text-right font-bold text-primary">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                value={editVendas}
+                                onChange={e => setEditVendas(Number(e.target.value))}
+                                className="w-20 px-2 py-1 border rounded text-right ml-auto"
+                              />
+                            ) : (
+                              sugerido
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {isEditing ? (
+                              <div className="flex justify-center gap-2">
+                                <button onClick={() => handleSaveEdit(p)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"><Check className="w-4 h-4" /></button>
+                                <button onClick={() => setEditingId(null)} className="p-1 text-red-600 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => { setEditingId(p.id!); setEditVendas(sugerido); }}
+                                className="p-1 text-primary hover:bg-primary/10 rounded inline-flex items-center gap-1 text-xs font-medium"
+                              >
+                                <Edit2 className="w-3 h-3" /> Aplicar
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
