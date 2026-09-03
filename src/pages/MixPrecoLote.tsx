@@ -22,7 +22,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
-import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
+import { calculateSellingPrice } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 import { exportToExcel } from '../utils/export';
 import { FileText } from 'lucide-react';
@@ -500,74 +500,27 @@ export default function MixPrecoLote() {
       </div>
       <div className="flex gap-2">
          <button onClick={() => {
-            const custoFixoTotal = custosFixos.reduce((a, b) => a + b.valor, 0);
-            const custosVariaveisTotais = produtos.reduce((a, p) => a + ((p.cmv || 0) * (p.vendasProjetadas || 0)), 0);
-            const receitaEstimada = produtos.reduce((a, p) => {
-               const imposto = p.imposto || 0;
-               const taxaCartao = p.taxaCartao || 0;
-               const comissao = p.comissao || 0;
-               const margem = p.margem || 0;
-               let precoVenda = p.precoFixo || 0;
-               if (p.modoPrecificacao === 'margem') {
-                  const custoVariavelPercent = imposto + taxaCartao + comissao + margem;
-                  if (custoVariavelPercent < 100) {
-                     precoVenda = (p.cmv || 0) / (1 - custoVariavelPercent / 100);
-                  }
-               }
-               return a + (precoVenda * (p.vendasProjetadas || 0));
-            }, 0);
-            const despesasVariaveisTotal = produtos.reduce((a, p) => {
-               const imposto = p.imposto || 0;
-               const taxaCartao = p.taxaCartao || 0;
-               const comissao = p.comissao || 0;
-               const margem = p.margem || 0;
-               let precoVenda = p.precoFixo || 0;
-               if (p.modoPrecificacao === 'margem') {
-                  const custoVariavelPercent = imposto + taxaCartao + comissao + margem;
-                  if (custoVariavelPercent < 100) {
-                     precoVenda = (p.cmv || 0) / (1 - custoVariavelPercent / 100);
-                  }
-               }
-               const despesasPercent = (imposto + taxaCartao + comissao) / 100;
-               return a + (precoVenda * despesasPercent * (p.vendasProjetadas || 0));
-            }, 0);
-            const margemContribuicaoTotal = receitaEstimada - custosVariaveisTotais - despesasVariaveisTotal;
-            const lucroLiquidoTotal = margemContribuicaoTotal - custoFixoTotal;
-            const percMargemContribuicao = receitaEstimada > 0 ? (margemContribuicaoTotal / receitaEstimada) : 0;
+            // Reaproveita os totais já calculados em processedProdutos/receitaTotal/margemTotal
+            // (os mesmos exibidos na tela), em vez de recalcular o preço com uma fórmula à parte
+            // — a antiga reimplementação aqui ignorava o custo fixo unitário rateado e por isso
+            // exportava números diferentes dos mostrados na tela.
+            const custosVariaveisTotais = processedProdutos.reduce((a, p) => a + (p.cmv || 0) * p.vendas, 0);
+            const despesasVariaveisTotal = processedProdutos.reduce((a, p) => a + (p.valorImposto + p.valorTaxa + p.valorComissao) * p.vendas, 0);
+            const percMargemContribuicao = receitaTotal > 0 ? (margemTotal / receitaTotal) : 0;
             const pontoEquilibrioFaturamento = percMargemContribuicao > 0 ? (custoFixoTotal / percMargemContribuicao) : 0;
 
             const mcUnitMap: Record<string, number> = {};
-            produtos.forEach(p => {
-               const imposto = p.imposto || 0;
-               const taxaCartao = p.taxaCartao || 0;
-               const comissao = p.comissao || 0;
-               const margem = p.margem || 0;
-               let precoVenda = p.precoFixo || 0;
-               if (p.modoPrecificacao === 'margem') {
-                  const custoVariavelPercent = imposto + taxaCartao + comissao + margem;
-                  if (custoVariavelPercent < 100) {
-                     precoVenda = (p.cmv || 0) / (1 - custoVariavelPercent / 100);
-                  }
-               }
-               const res = calculateContributionMargin({
-                  salePrice: precoVenda,
-                  costPrice: p.cmv,
-                  taxesPercent: (p.imposto || 0) / 100,
-                  feesPercent: (p.taxaCartao || 0) / 100,
-                  comissionPercent: (p.comissao || 0) / 100
-               });
-               mcUnitMap[p.id] = res;
-            });
+            processedProdutos.forEach(p => { mcUnitMap[p.id] = p.margemContribuicao; });
 
             exportToExcel(
                false,
                produtos,
-               receitaEstimada,
+               receitaTotal,
                custoFixoTotal,
                custosVariaveisTotais,
                despesasVariaveisTotal,
-               margemContribuicaoTotal,
-               lucroLiquidoTotal,
+               margemTotal,
+               lucroMix,
                pontoEquilibrioFaturamento,
                mcUnitMap
             );

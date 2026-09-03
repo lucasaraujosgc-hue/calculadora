@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { execSync } from "child_process";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
@@ -53,11 +54,26 @@ const transporter = nodemailer.createTransport({
 });
 
 export const PLANS = {
-  basico: { id: "basico", name: "Básico", priceCents: 949, productLimit: 20, excelImport: false, consultingCall: false },
-  intermediario: { id: "intermediario", name: "Intermediário", priceCents: 2749, productLimit: 80, excelImport: true, consultingCall: false },
-  ilimitado: { id: "ilimitado", name: "Ilimitado", priceCents: 5990, productLimit: Number.MAX_SAFE_INTEGER, excelImport: true, consultingCall: true }
+  basico: { id: "basico", name: "Básico", description: "Para quem está começando", priceCents: 949, productLimit: 20, excelImport: false, consultingCall: false },
+  intermediario: { id: "intermediario", name: "Intermediário", description: "Para negócios em crescimento", priceCents: 2749, productLimit: 80, excelImport: true, consultingCall: false },
+  ilimitado: { id: "ilimitado", name: "Ilimitado", description: "Acesso total e suporte", priceCents: 5990, productLimit: Number.MAX_SAFE_INTEGER, excelImport: true, consultingCall: true }
 } as const;
 export type PlanId = keyof typeof PLANS;
+
+// Público: única fonte de verdade sobre preços/limites dos planos, consumida
+// pela tela de preços no frontend para evitar duplicar (e desalinhar) esses
+// valores em dois lugares.
+app.get("/api/plans", (req, res) => {
+  res.json(Object.values(PLANS).map(p => ({
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    priceCents: p.priceCents,
+    productLimit: p.productLimit >= Number.MAX_SAFE_INTEGER ? null : p.productLimit,
+    excelImport: p.excelImport,
+    consultingCall: p.consultingCall
+  })));
+});
 
 // Admin routes reuse the same user_token/role system as the rest of the app
 // (there is no separate admin login/cookie — a user becomes admin via the
@@ -1102,7 +1118,6 @@ async function setupVite() {
     // Run migrations on startup
     
     try {
-      const { execSync } = require("child_process");
       console.log("Executando drizzle-kit push (sincronização do schema)...");
       execSync("npx drizzle-kit push --force", { stdio: "inherit", env: process.env });
     } catch (err) {
