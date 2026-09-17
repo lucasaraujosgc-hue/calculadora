@@ -206,6 +206,8 @@ function montarItem(det: any): ItemNota {
     unidadeTributavel,
     quantidadeTributavel,
     eanTributavel,
+    eanComercial,
+    chaveComercial: eanComercial || normalizarDescricao(descricao),
     fatorConversao,
     convertidoPorEmbalagem,
     valorProduto,

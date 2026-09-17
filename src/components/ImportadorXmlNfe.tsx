@@ -23,8 +23,32 @@ interface VinculoListado {
   chaveOrigem: string;
   chaveDestino: string;
   fator: number;
+  status: 'confirmado' | 'sugerido' | 'descartado';
+  origem: 'manual' | 'nota' | 'sugestao';
+  motivo: string | null;
   nomeOrigem: string | null;
   nomeDestino: string | null;
+}
+
+/** Par que o sistema acha que é o mesmo produto, esperando confirmação. */
+interface SugestaoVinculo {
+  chaveOrigem: string;
+  chaveDestino: string;
+  nomeOrigem: string;
+  nomeDestino: string;
+  fator: number | null;
+  motivo: string;
+  confianca: number;
+}
+
+/** Conversão que a própria nota declarou e o sistema já aplicou. */
+interface ConversaoDaNota {
+  chaveOrigem: string;
+  chaveDestino: string;
+  fator: number;
+  nomeOrigem: string;
+  unidadeComercial: string;
+  unidadeTributavel: string;
 }
 
 interface NotaImportada {
@@ -100,6 +124,10 @@ export default function ImportadorXmlNfe() {
   const [expandido, setExpandido] = useState<string | null>(null);
 
   const [vinculos, setVinculos] = useState<VinculoListado[]>([]);
+  const [sugestoesVinculo, setSugestoesVinculo] = useState<SugestaoVinculo[]>([]);
+  const [conversoesDaNota, setConversoesDaNota] = useState<ConversaoDaNota[]>([]);
+  // Fator que o usuário pode ajustar antes de confirmar cada sugestão.
+  const [fatoresSugeridos, setFatoresSugeridos] = useState<Record<string, number>>({});
   // Produto cuja embalagem está sendo vinculada agora.
   const [vinculando, setVinculando] = useState<string | null>(null);
   const [destinoVinculo, setDestinoVinculo] = useState('');
@@ -123,6 +151,8 @@ export default function ImportadorXmlNfe() {
         setCompetencias(data.competencias || []);
         setProdutos(data.produtos || []);
         setVinculos(data.vinculos || []);
+        setSugestoesVinculo(data.sugestoes || []);
+        setConversoesDaNota(data.conversoesDaNota || []);
       }
     } catch {
       // Sem conexão: a tela simplesmente fica sem o resumo.
@@ -279,6 +309,8 @@ export default function ImportadorXmlNfe() {
         chaveOrigem: origem.chaveProduto,
         chaveDestino: destinoVinculo,
         fator: fatorVinculo,
+        status: 'confirmado',
+        origem: 'manual',
         nomeOrigem: origem.descricao,
         nomeDestino: destino?.descricao ?? '',
       }),
@@ -291,6 +323,65 @@ export default function ImportadorXmlNfe() {
     setVinculando(null);
     await carregarResumo();
   };
+
+  /** Grava a decisão do usuário sobre uma sugestão ou uma conversão da nota. */
+  const decidirVinculo = async (dados: {
+    chaveOrigem: string;
+    chaveDestino: string;
+    fator: number;
+    status: 'confirmado' | 'descartado';
+    origem: 'sugestao' | 'nota';
+    nomeOrigem?: string;
+    nomeDestino?: string;
+    motivo?: string;
+  }) => {
+    const res = await fetch('/api/fiscal/vinculos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (res.ok) await carregarResumo();
+    return res.ok;
+  };
+
+  const confirmarSugestao = async (s: SugestaoVinculo) => {
+    const fator = fatoresSugeridos[s.chaveOrigem] ?? s.fator ?? 0;
+    if (!(fator > 0)) {
+      setErroVinculo(`Informe quantas unidades vêm em "${s.nomeOrigem}".`);
+      return;
+    }
+    setErroVinculo('');
+    await decidirVinculo({
+      chaveOrigem: s.chaveOrigem,
+      chaveDestino: s.chaveDestino,
+      fator,
+      status: 'confirmado',
+      origem: 'sugestao',
+      nomeOrigem: s.nomeOrigem,
+      nomeDestino: s.nomeDestino,
+      motivo: s.motivo,
+    });
+  };
+
+  const descartarSugestao = (s: SugestaoVinculo) => decidirVinculo({
+    chaveOrigem: s.chaveOrigem,
+    chaveDestino: s.chaveDestino,
+    fator: s.fator ?? 1,
+    status: 'descartado',
+    origem: 'sugestao',
+    nomeOrigem: s.nomeOrigem,
+    nomeDestino: s.nomeDestino,
+  });
+
+  const desfazerConversaoDaNota = (c: ConversaoDaNota) => decidirVinculo({
+    chaveOrigem: c.chaveOrigem,
+    chaveDestino: c.chaveDestino,
+    fator: c.fator,
+    status: 'descartado',
+    origem: 'nota',
+    nomeOrigem: c.nomeOrigem,
+    nomeDestino: c.nomeOrigem,
+  });
 
   const removerVinculo = async (id: string) => {
     await fetch(`/api/fiscal/vinculos/${id}`, { method: 'DELETE' });
@@ -429,6 +520,101 @@ export default function ImportadorXmlNfe() {
                 Nenhuma nota importada ainda. Baixe os XMLs no portal da sua contabilidade ou no site da SEFAZ e envie
                 aqui — pode mandar compras e vendas de vários meses de uma vez.
               </span>
+            </div>
+          )}
+
+          {(sugestoesVinculo.length > 0 || conversoesDaNota.length > 0) && (
+            <div className="border border-amber-300 bg-amber-50/60 rounded-lg p-4 space-y-4">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-foreground">Vinculações para você conferir</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Nada aqui é decidido sozinho: as sugestões só passam a valer depois que você confirmar, e o que a
+                    nota declarou fica visível para você desfazer se não concordar.
+                  </p>
+                </div>
+              </div>
+
+              {sugestoesVinculo.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-amber-900 uppercase tracking-wide">
+                    Sugestões pendentes ({sugestoesVinculo.length}) — ainda não aplicadas
+                  </p>
+                  {sugestoesVinculo.map(sg => {
+                    const fator = fatoresSugeridos[sg.chaveOrigem] ?? sg.fator ?? 0;
+                    return (
+                      <div key={sg.chaveOrigem} className="bg-background border border-border rounded-md p-3">
+                        <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+                          <div className="flex-1 text-sm">
+                            <span className="text-muted-foreground">1 </span>
+                            <strong className="text-foreground">{sg.nomeOrigem}</strong>
+                            <span className="text-muted-foreground"> contém </span>
+                            <input
+                              type="number"
+                              min={1}
+                              step="any"
+                              value={fator || ''}
+                              placeholder="?"
+                              onChange={e => setFatoresSugeridos(prev => ({ ...prev, [sg.chaveOrigem]: Number(e.target.value) }))}
+                              className="w-20 mx-1 px-2 py-1 border border-border rounded bg-background text-sm"
+                            />
+                            <span className="text-muted-foreground"> unidades de </span>
+                            <strong className="text-foreground">{sg.nomeDestino}</strong>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => confirmarSugestao(sg)}
+                              className="px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-xs font-medium hover:bg-primary/90"
+                            >
+                              Confirmar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => descartarSugestao(sg)}
+                              className="px-3 py-1.5 border border-border rounded-md text-xs font-medium hover:bg-muted"
+                            >
+                              Não é o mesmo produto
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1.5">
+                          Por que sugerimos: {sg.motivo}.
+                          {sg.fator === null && ' Não achamos a quantidade na descrição — confira na embalagem.'}
+                        </p>
+                      </div>
+                    );
+                  })}
+                  {erroVinculo && <p className="text-xs text-red-700">{erroVinculo}</p>}
+                </div>
+              )}
+
+              {conversoesDaNota.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-emerald-900 uppercase tracking-wide">
+                    Convertidos pela própria nota ({conversoesDaNota.length}) — já aplicados
+                  </p>
+                  {conversoesDaNota.map(c => (
+                    <div key={c.chaveOrigem} className="bg-background border border-border rounded-md p-3 flex flex-col sm:flex-row sm:items-center gap-2">
+                      <p className="text-sm flex-1">
+                        <strong className="text-foreground">{c.nomeOrigem}</strong>
+                        <span className="text-muted-foreground">
+                          {' '}— comprado em {c.unidadeComercial || 'embalagem'}, com{' '}
+                          {c.fator.toLocaleString('pt-BR')} {c.unidadeTributavel || 'un'} por embalagem informados na nota.
+                        </span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => desfazerConversaoDaNota(c)}
+                        className="px-3 py-1.5 border border-border rounded-md text-xs font-medium hover:bg-muted shrink-0"
+                      >
+                        Desfazer conversão
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -677,11 +863,11 @@ export default function ImportadorXmlNfe() {
                 </div>
               </div>
 
-              {vinculos.length > 0 && (
+              {vinculos.some(v => v.status === 'confirmado') && (
                 <div className="border border-sky-200 bg-sky-50/50 rounded-lg p-3">
-                  <p className="text-xs font-medium text-foreground mb-2">Embalagens vinculadas</p>
+                  <p className="text-xs font-medium text-foreground mb-2">Embalagens vinculadas e confirmadas</p>
                   <ul className="space-y-1">
-                    {vinculos.map(v => (
+                    {vinculos.filter(v => v.status === 'confirmado').map(v => (
                       <li key={v.id} className="flex items-center justify-between gap-2 text-xs">
                         <span className="text-muted-foreground truncate">
                           1 <strong className="text-foreground">{v.nomeOrigem || v.chaveOrigem}</strong> ={' '}
@@ -701,11 +887,38 @@ export default function ImportadorXmlNfe() {
                 </div>
               )}
 
+              {vinculos.some(v => v.status === 'descartado') && (
+                <div className="border border-border rounded-lg p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                    Descartados por você — não valem no cálculo e não voltam a ser sugeridos
+                  </p>
+                  <ul className="space-y-1">
+                    {vinculos.filter(v => v.status === 'descartado').map(v => (
+                      <li key={v.id} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-muted-foreground truncate">
+                          {v.origem === 'nota' ? 'Conversão da nota desfeita: ' : 'Sugestão recusada: '}
+                          <strong className="text-foreground">{v.nomeOrigem || v.chaveOrigem}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removerVinculo(v.id)}
+                          title="Voltar atrás nesta decisão"
+                          className="text-muted-foreground hover:text-primary shrink-0 underline underline-offset-2"
+                        >
+                          voltar atrás
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="flex items-start gap-2 p-3 bg-muted/50 border border-border rounded-md text-xs text-muted-foreground">
                 <Info className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>
-                  Compra em fardo e venda por unidade: quando a nota declara a embalagem (uCom ≠ uTrib), a conversão é automática.
-                  Quando não declara, use o botão de vincular ao lado do produto para dizer quantas unidades vêm na embalagem.
+                  Compra em fardo e venda por unidade: quando a nota declara a embalagem (uCom ≠ uTrib), a conversão entra
+                  aplicada, mas fica listada acima para você desfazer. Quando a nota não declara, o sistema no máximo sugere —
+                  e a sugestão só vale depois que você confirmar. Você também pode vincular na mão, pelo botão ao lado do produto.
                   O custo médio já inclui frete, seguro, outras despesas, IPI e ICMS-ST da nota, descontado o desconto —
                   é o custo de aquisição de verdade. Devoluções, transferências e remessas ficam fora das médias para não
                   distorcer o preço. As médias são ponderadas pela quantidade.

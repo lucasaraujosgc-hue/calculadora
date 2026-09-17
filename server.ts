@@ -18,7 +18,8 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import multer from "multer";
 import * as XLSX from "xlsx";
-import { ErroNotaFiscal, direcaoDaNota, lerNotaFiscal, somenteDigitos } from "./src/domain/fiscal/nfe.js";
+import { ErroNotaFiscal, direcaoDaNota, lerNotaFiscal, normalizarDescricao, somenteDigitos } from "./src/domain/fiscal/nfe.js";
+import { sugerirVinculos } from "./src/domain/fiscal/sugestoes.js";
 import { aplicarVinculos, resumirPorProdutoPeriodo, type ItemComContexto } from "./src/domain/fiscal/agregacao.js";
 
 dotenv.config();
@@ -1058,6 +1059,7 @@ app.post("/api/fiscal/import", requireUser, uploadXml.array("files", 300), async
             cofins: item.cofins,
             valorLiquido: item.valorLiquido,
             chaveProduto: item.chaveProduto,
+            eanComercial: item.eanComercial,
             origemChave: item.origemChave,
           });
         }
@@ -1117,6 +1119,8 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
       unidadeTributavel: l.convertidoPorEmbalagem ? (l.unidade || "") : "",
       quantidadeTributavel: l.convertidoPorEmbalagem ? l.quantidade : 0,
       eanTributavel: l.convertidoPorEmbalagem ? (l.ean || "") : "",
+      eanComercial: l.eanComercial || "",
+      chaveComercial: l.eanComercial || normalizarDescricao(l.descricao),
       fatorConversao: l.fatorConversao,
       convertidoPorEmbalagem: l.convertidoPorEmbalagem,
       valorProduto: l.valorProduto,
@@ -1137,22 +1141,79 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
     },
   }));
 
-  // Os vínculos convertem o produto-embalagem no produto vendido antes de somar.
   const vinculos = await db.select().from(fiscalProductLinks)
     .where(eq(fiscalProductLinks.userId, req.currentUser.id));
+
+  // Só o que o usuário confirmou entra na conta. Sugestão nenhuma é aplicada
+  // sozinha — ela fica esperando o "confirmar".
+  const confirmados = vinculos.filter((v: any) => v.status === "confirmado");
+
+  // Uma conversão declarada pela nota que o usuário desfez volta ao valor
+  // original: a quantidade divide pelo fator e a chave volta a ser a da embalagem.
+  const desfeitas = new Map<string, any>();
+  for (const v of vinculos) {
+    if (v.origem === "nota" && v.status === "descartado") desfeitas.set(v.chaveOrigem, v);
+  }
+  const itensAjustados = desfeitas.size === 0 ? itens : itens.map(entrada => {
+    const item = entrada.item;
+    if (!item.convertidoPorEmbalagem || item.fatorConversao <= 0) return entrada;
+    if (!desfeitas.has(item.chaveComercial)) return entrada;
+    const quantidade = item.quantidade / item.fatorConversao;
+    return {
+      ...entrada,
+      item: {
+        ...item,
+        chaveProduto: item.chaveComercial,
+        unidade: item.unidadeComercial || item.unidade,
+        quantidade,
+        valorUnitario: quantidade > 0 ? item.valorProduto / quantidade : 0,
+        valorUnitarioLiquido: quantidade > 0 ? item.valorLiquido / quantidade : 0,
+        convertidoPorEmbalagem: false,
+      },
+    };
+  });
+
+  const produtos = resumirPorProdutoPeriodo(aplicarVinculos(itensAjustados, confirmados as any), { de, ate });
+
+  // Sugestões novas: pares que o sistema acha que são o mesmo produto em
+  // embalagens diferentes. Nada disso vale antes de o usuário confirmar.
+  const jaResolvidas = new Set<string>(vinculos.map((v: any) => v.chaveOrigem));
+  const sugestoesNovas = sugerirVinculos(produtos, { jaResolvidas });
+
+  // As conversões que a nota declarou aparecem para revisão, mesmo já aplicadas.
+  const conversoesDaNota = new Map<string, any>();
+  for (const { item } of itensAjustados) {
+    if (!item.convertidoPorEmbalagem) continue;
+    if (desfeitas.has(item.chaveComercial)) continue;
+    if (conversoesDaNota.has(item.chaveComercial)) continue;
+    conversoesDaNota.set(item.chaveComercial, {
+      chaveOrigem: item.chaveComercial,
+      chaveDestino: item.chaveProduto,
+      fator: item.fatorConversao,
+      nomeOrigem: item.descricao,
+      nomeDestino: item.descricao,
+      unidadeComercial: item.unidadeComercial,
+      unidadeTributavel: item.unidade,
+    });
+  }
 
   const competencias = [...new Set(linhas.map((l: any) => l.competencia))].sort();
   res.json({
     competencias,
-    produtos: resumirPorProdutoPeriodo(aplicarVinculos(itens, vinculos as any), { de, ate }),
+    produtos,
     vinculos: vinculos.map((v: any) => ({
       id: v.id,
       chaveOrigem: v.chaveOrigem,
       chaveDestino: v.chaveDestino,
       fator: v.fator,
+      status: v.status,
+      origem: v.origem,
+      motivo: v.motivo,
       nomeOrigem: v.nomeOrigem,
       nomeDestino: v.nomeDestino,
     })),
+    sugestoes: sugestoesNovas,
+    conversoesDaNota: [...conversoesDaNota.values()],
   });
 });
 
@@ -1177,11 +1238,19 @@ app.post("/api/fiscal/vinculos", requireUser, async (req: any, res) => {
       return res.status(400).json({ error: "Já existe um vínculo no sentido contrário entre esses dois produtos." });
     }
 
+    const statusPedido = String(req.body?.status ?? "confirmado");
+    const status = ["confirmado", "sugerido", "descartado"].includes(statusPedido) ? statusPedido : "confirmado";
+    const origemPedida = String(req.body?.origem ?? "manual");
+    const origem = ["manual", "nota", "sugestao"].includes(origemPedida) ? origemPedida : "manual";
+
     const valores = {
       userId: req.currentUser.id,
       chaveOrigem,
       chaveDestino,
       fator,
+      status,
+      origem,
+      motivo: String(req.body?.motivo ?? "").trim() || null,
       nomeOrigem: String(req.body?.nomeOrigem ?? "").trim() || null,
       nomeDestino: String(req.body?.nomeDestino ?? "").trim() || null,
     };
@@ -1189,7 +1258,10 @@ app.post("/api/fiscal/vinculos", requireUser, async (req: any, res) => {
     const salvo = await db.insert(fiscalProductLinks).values(valores)
       .onConflictDoUpdate({
         target: [fiscalProductLinks.userId, fiscalProductLinks.chaveOrigem],
-        set: { chaveDestino, fator, nomeOrigem: valores.nomeOrigem, nomeDestino: valores.nomeDestino },
+        set: {
+          chaveDestino, fator, status, origem,
+          motivo: valores.motivo, nomeOrigem: valores.nomeOrigem, nomeDestino: valores.nomeDestino,
+        },
       })
       .returning();
 

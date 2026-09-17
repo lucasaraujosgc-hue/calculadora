@@ -146,6 +146,8 @@ export const fiscalItems = pgTable('fiscal_items', {
   numero: integer('numero').default(0).notNull(),
   codigo: text('codigo'),
   ean: text('ean'),
+  /** cEAN da embalagem, guardado para poder desfazer a conversão automática. */
+  eanComercial: text('ean_comercial'),
   descricao: text('descricao').notNull(),
   ncm: text('ncm'),
   cfop: text('cfop'),
@@ -198,6 +200,17 @@ export const fiscalProductLinks = pgTable('fiscal_product_links', {
   chaveDestino: text('chave_destino').notNull(),
   /** Quantas unidades do destino há em uma unidade da origem. */
   fator: doublePrecision('fator').default(1).notNull(),
+  /**
+   * 'confirmado' — vale no cálculo.
+   * 'sugerido'  — o sistema propôs, mas nada é aplicado até o usuário confirmar.
+   * 'descartado'— o usuário recusou; serve para a sugestão não voltar e para
+   *               desfazer uma conversão que a nota declarou.
+   */
+  status: text('status').default('confirmado').notNull(),
+  /** 'manual' (o usuário criou), 'nota' (veio da unidade tributável) ou 'sugestao'. */
+  origem: text('origem').default('manual').notNull(),
+  /** Por que o sistema sugeriu — mostrado ao usuário na hora de confirmar. */
+  motivo: text('motivo'),
   /** Guardados só para a tela conseguir mostrar nomes sem recalcular o resumo. */
   nomeOrigem: text('nome_origem'),
   nomeDestino: text('nome_destino'),

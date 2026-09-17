@@ -26,6 +26,8 @@ function item(opcoes: Partial<ItemNota> & { quantidade: number; valorLiquido: nu
     unidadeTributavel: 'UN',
     quantidadeTributavel: opcoes.quantidade,
     eanTributavel: ean,
+    eanComercial: ean,
+    chaveComercial: ean || descricao,
     fatorConversao: 1,
     convertidoPorEmbalagem: false,
     valorProduto: opcoes.valorLiquido,

@@ -54,6 +54,10 @@ export interface ItemNota {
   quantidadeTributavel: number;
   /** cEANTrib, quando é um GTIN válido. */
   eanTributavel: string;
+  /** cEAN da embalagem — permite voltar atrás numa conversão automática. */
+  eanComercial: string;
+  /** Chave que o produto teria se a conversão pela nota não fosse aplicada. */
+  chaveComercial: string;
   /**
    * Quantas unidades tributáveis cabem em uma unidade comercial (qTrib ÷ qCom).
    * Num fardo de 12, vale 12.
@@ -154,7 +158,10 @@ export interface ResumoProduto {
   variacaoPrecoPercent: number | null;
 }
 
-/** Vínculo manual entre dois produtos com unidades diferentes. */
+export type StatusVinculo = 'confirmado' | 'sugerido' | 'descartado';
+export type OrigemVinculo = 'manual' | 'nota' | 'sugestao';
+
+/** Vínculo entre dois produtos com unidades diferentes. */
 export interface VinculoProduto {
   /** Chave do produto como ele aparece nas notas (ex.: o fardo). */
   chaveOrigem: string;
