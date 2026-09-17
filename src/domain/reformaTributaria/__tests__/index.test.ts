@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   ALIQUOTA_REF_CBS,
   ALIQUOTA_REF_IBS,
+  PRESETS_REGIME,
+  parcelaPisCofins,
+  projetarPrecoReforma,
   aliquotasDoAno,
   apurarIVA,
   baseDoPrecoPorFora,
@@ -43,8 +46,13 @@ describe('Cronograma da transição', () => {
     const a = aliquotasDoAno(2033);
     expect(a.cbs).toBe(ALIQUOTA_REF_CBS);
     expect(a.ibs).toBe(ALIQUOTA_REF_IBS);
-    expect(a.totalPorFora).toBeCloseTo(26.5, 10);
+    expect(a.totalPorFora).toBeCloseTo(ALIQUOTA_REF_CBS + ALIQUOTA_REF_IBS, 10);
     expect(a.fatorIcmsIss).toBe(0);
+  });
+
+  it('a alíquota de referência da CBS é 9,21%', () => {
+    expect(ALIQUOTA_REF_CBS).toBe(9.21);
+    expect(aliquotasDoAno(2027).cbs).toBeCloseTo(9.11, 10); // 9,21 − 0,1 p.p.
   });
 
   it('aceita alíquotas de referência customizadas', () => {
@@ -200,5 +208,100 @@ describe('Formação de preço', () => {
   it('retorna zero quando as deduções consomem todo o preço', () => {
     expect(precoPorDentro({ custo: 100, despesasPercent: 50, margemPercent: 30, tributosPorDentroPercent: 25 }).precoFinal).toBe(0);
     expect(precoPorFora({ custo: 100, despesasPercent: 60, margemPercent: 40, aliquotaPorForaPercent: 10 }).precoFinal).toBe(0);
+  });
+});
+
+describe('Parcela de PIS/COFINS por regime', () => {
+  it('Lucro Presumido usa 3,65% e Lucro Real 9,25%', () => {
+    expect(parcelaPisCofins('presumido', 21.65, 'Anexo I', 0)).toBeCloseTo(3.65, 10);
+    expect(parcelaPisCofins('real', 27.25, 'Anexo I', 0)).toBeCloseTo(9.25, 10);
+  });
+
+  it('nunca devolve mais do que o imposto informado', () => {
+    expect(parcelaPisCofins('presumido', 2, 'Anexo I', 0)).toBeCloseTo(2, 10);
+  });
+
+  it('no Simples usa a repartição do anexo e da faixa', () => {
+    // Anexo I, faixa 1: PIS 2,76% + COFINS 12,74% = 15,5% do DAS.
+    expect(parcelaPisCofins('simplesFora', 10, 'Anexo I', 0)).toBeCloseTo(1.55, 10);
+  });
+
+  it('regimes em que o preço não muda devolvem zero', () => {
+    expect(parcelaPisCofins('mei', 20, 'Anexo I', 0)).toBe(0);
+    expect(parcelaPisCofins('simplesDentro', 20, 'Anexo I', 0)).toBe(0);
+    expect(PRESETS_REGIME.mei.precoMuda).toBe(false);
+    expect(PRESETS_REGIME.simplesDentro.precoMuda).toBe(false);
+  });
+});
+
+describe('Projeção de preço na reforma', () => {
+  const base = {
+    cmv: 100,
+    custoFixoUnitario: 0,
+    impostoPercent: 21.65,
+    pisCofinsPercent: 3.65,
+    despesasPercent: 5,
+    margemPercent: 20,
+    aliquotaCbs: 9.11,
+    classificacao: 'padrao' as const,
+    percCmvComCredito: 0,
+    precoAtual: 100 / (1 - 0.4665),
+  };
+
+  it('sem crédito, o preço sobe porque o imposto sai de dentro e entra por fora', () => {
+    const r = projetarPrecoReforma(base);
+    expect(r.impostoPorDentroRestante).toBeCloseTo(18, 10); // só o ICMS
+    expect(r.creditoCbsUnitario).toBe(0);
+    expect(r.receitaLiquida).toBeCloseTo(100 / (1 - 0.43), 10);
+    expect(r.precoMantendoMargem).toBeCloseTo((100 / 0.57) * 1.0911, 10);
+    expect(r.variacaoPercent).toBeGreaterThan(0);
+  });
+
+  it('com crédito de CBS na compra, o custo cai e o preço pode cair junto', () => {
+    const r = projetarPrecoReforma({ ...base, percCmvComCredito: 100 });
+    expect(r.creditoCbsUnitario).toBeCloseTo(100 * (9.11 / 109.11), 10);
+    expect(r.custoLiquidoUnitario).toBeCloseTo(100 - 100 * (9.11 / 109.11), 10);
+    expect(r.precoMantendoMargem).toBeLessThan(base.precoAtual);
+    expect(r.variacaoPercent).toBeLessThan(0);
+  });
+
+  it('o redutor de 60% reduz a alíquota somada por fora', () => {
+    const r = projetarPrecoReforma({ ...base, classificacao: 'reducao60' });
+    expect(r.aliquotaCbsAplicada).toBeCloseTo(9.11 * 0.4, 10);
+  });
+
+  it('alíquota zero mantém o crédito da compra e não soma nada ao preço', () => {
+    const r = projetarPrecoReforma({ ...base, classificacao: 'zero', percCmvComCredito: 100 });
+    expect(r.cbsPorFora).toBe(0);
+    expect(r.creditoCbsUnitario).toBeGreaterThan(0);
+    expect(r.precoMantendoMargem).toBe(r.receitaLiquida);
+  });
+
+  it('revenda monofásica não gera crédito na compra', () => {
+    const r = projetarPrecoReforma({ ...base, classificacao: 'monofasicoRevenda', percCmvComCredito: 100 });
+    expect(r.creditoCbsUnitario).toBe(0);
+  });
+
+  it('mantendo o preço de hoje, calcula a margem que sobra', () => {
+    const r = projetarPrecoReforma({ ...base, percCmvComCredito: 100 });
+    // Como o preço projetado é menor, segurar o preço de hoje aumenta a margem.
+    expect(r.margemMantendoPreco).toBeGreaterThan(base.margemPercent);
+    expect(r.lucroMantendoPreco).toBeCloseTo(base.precoAtual * (r.margemMantendoPreco / 100), 8);
+  });
+
+  it('2033: com todo o imposto saindo de dentro, o preço é formado sem tributo', () => {
+    const r = projetarPrecoReforma({
+      ...base,
+      pisCofinsPercent: base.impostoPercent,
+      aliquotaCbs: 26.91,
+      percCmvComCredito: 0,
+    });
+    expect(r.impostoPorDentroRestante).toBe(0);
+    expect(r.receitaLiquida).toBeCloseTo(100 / (1 - 0.25), 10);
+  });
+
+  it('devolve zero quando as deduções consomem todo o preço', () => {
+    const r = projetarPrecoReforma({ ...base, margemPercent: 90 });
+    expect(r.precoMantendoMargem).toBe(0);
   });
 });

@@ -3,6 +3,12 @@ import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis
 import { useAppContext } from '../context/AppContext';
 import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
+import {
+  PainelReformaPreco,
+  SeloPrecoReforma,
+  useMotorReforma,
+  useReformaPrecoConfig,
+} from '../components/ReformaPreco';
 
 export default function FormacaoPreco() {
   const { produtos, custosFixos, saveProduto } = useAppContext();
@@ -22,6 +28,10 @@ export default function FormacaoPreco() {
   const [percentualRateio, setPercentualRateio] = useState(100);
 
   const custoFixoTotal = custosFixos.reduce((acc, curr) => acc + curr.valor, 0);
+
+  // Projeção do preço na Reforma Tributária (compartilhada com Preços em Lote)
+  const { config: reformaConfig, setConfig: setReformaConfig } = useReformaPrecoConfig();
+  const motorReforma = useMotorReforma(reformaConfig);
 
   // Sync selected product
   useEffect(() => {
@@ -113,6 +123,15 @@ export default function FormacaoPreco() {
   } else {
     tempoAtingirStr = `${Math.ceil(diasParaAtingir)} dias`;
   }
+
+  const projecaoReforma = motorReforma.projetar({
+    cmv: custo,
+    custoFixoUnitario,
+    impostoPercent: imposto,
+    despesasPercent: taxaCartao + comissao,
+    margemPercent: margemReal,
+    precoAtual: precoFinal,
+  });
 
   const data = [
     { name: 'Custo Variável (CMV)', value: custo },
@@ -230,6 +249,8 @@ export default function FormacaoPreco() {
               Salvar Configuração no Produto
             </button>
           </div>
+
+          <PainelReformaPreco config={reformaConfig} setConfig={setReformaConfig} motor={motorReforma} />
         </div>
 
         {/* Resultados */}
@@ -266,6 +287,71 @@ export default function FormacaoPreco() {
                 <p className="text-xs text-muted-foreground mt-2">O lucro real após descontar sua cota de custo fixo (estimativa).</p>
              </div>
           </div>
+
+          {reformaConfig.ativo && (
+            <div className="bg-card border border-sky-300 p-6 rounded-xl shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-lg font-medium text-primary">Este preço com a Reforma Tributária — {reformaConfig.ano}</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {motorReforma.preset.label}
+                    {motorReforma.precoMuda && ` · ${motorReforma.aliquotaPorFora.toFixed(2)}% por fora do preço`}
+                  </p>
+                </div>
+                <div className="shrink-0">
+                  <SeloPrecoReforma projecao={projecaoReforma} precoMuda={motorReforma.precoMuda} formatar={formatCurrency} />
+                </div>
+              </div>
+
+              {motorReforma.precoMuda ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                    <div className="p-3 bg-muted/40 rounded-lg border border-border">
+                      <p className="text-xs text-muted-foreground mb-1">Preço de hoje</p>
+                      <p className="text-xl font-bold text-foreground">{formatCurrency(precoFinal)}</p>
+                      <p className="text-xs text-muted-foreground mt-1">margem de {margemReal.toFixed(1)}%</p>
+                    </div>
+                    <div className="p-3 bg-sky-50 rounded-lg border border-sky-200">
+                      <p className="text-xs text-sky-800 mb-1">Mantendo a mesma margem</p>
+                      <p className="text-xl font-bold text-sky-700">{formatCurrency(projecaoReforma.precoMantendoMargem)}</p>
+                      <p className={`text-xs mt-1 font-medium ${projecaoReforma.variacaoPercent > 0.005 ? 'text-red-600' : projecaoReforma.variacaoPercent < -0.005 ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+                        {projecaoReforma.variacaoPercent >= 0 ? '+' : ''}{projecaoReforma.variacaoPercent.toFixed(2)}% no preço
+                      </p>
+                    </div>
+                    <div className="p-3 bg-muted/40 rounded-lg border border-border">
+                      <p className="text-xs text-muted-foreground mb-1">Mantendo o preço de hoje</p>
+                      <p className={`text-xl font-bold ${projecaoReforma.margemMantendoPreco >= margemReal ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {projecaoReforma.margemMantendoPreco.toFixed(1)}%
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        de margem ({formatCurrency(projecaoReforma.lucroMantendoPreco)} por unidade)
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-muted/30 rounded-lg border border-border space-y-1">
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">CMV de hoje</span><span className="font-medium">{formatCurrency(custo)}</span></div>
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">(–) Crédito de CBS embutido na compra</span><span className="font-medium text-emerald-700">{formatCurrency(projecaoReforma.creditoCbsUnitario)}</span></div>
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Custo líquido depois do crédito</span><span className="font-medium">{formatCurrency(projecaoReforma.custoLiquidoUnitario)}</span></div>
+                    <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Imposto que continua por dentro do preço</span><span className="font-medium">{projecaoReforma.impostoPorDentroRestante.toFixed(2)}%</span></div>
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Receita líquida da empresa</span><span className="font-medium">{formatCurrency(projecaoReforma.receitaLiquida)}</span></div>
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">(+) CBS somada por fora ({projecaoReforma.aliquotaCbsAplicada.toFixed(2)}%)</span><span className="font-medium">{formatCurrency(projecaoReforma.cbsPorFora)}</span></div>
+                    <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Preço final ao cliente</span><span className="font-semibold text-primary">{formatCurrency(projecaoReforma.precoMantendoMargem)}</span></div>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground mt-3">
+                    O imposto sai de dentro do preço e passa a ser somado por fora, destacado na nota. Ao mesmo tempo, o crédito de
+                    CBS da compra derruba o custo. Por isso o preço pode cair mesmo com a alíquota parecendo maior.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Em {reformaConfig.ano}, no {motorReforma.preset.label}, o valor da guia não muda — então o preço de{' '}
+                  {formatCurrency(precoFinal)} continua valendo. {motorReforma.preset.descricao}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="bg-card border border-border p-6 rounded-xl shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4">
