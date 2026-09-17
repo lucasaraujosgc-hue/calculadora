@@ -9,6 +9,7 @@ import MixPrecoLote from './pages/MixPrecoLote';
 import CustoFixo from './pages/CustoFixo';
 import CustosVariaveis from './pages/CustosVariaveis';
 import SimuladorImpostos from './pages/SimuladorImpostos';
+import ReformaTributaria from './pages/ReformaTributaria';
 import VerifyEmail from './pages/VerifyEmail';
 import ResetPassword from './pages/ResetPassword';
 import AdminPanel from './pages/AdminPanel';
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/custos-fixos" element={<ProtectedRoute><CustoFixo /></ProtectedRoute>} />
         <Route path="/custos-variaveis" element={<ProtectedRoute><CustosVariaveis /></ProtectedRoute>} />
         <Route path="/impostos" element={<ProtectedRoute><SimuladorImpostos /></ProtectedRoute>} />
+        <Route path="/reforma-tributaria" element={<ProtectedRoute><ReformaTributaria /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><AdminPanel /></ProtectedRoute>} />
         {/* Catch-all */}
         <Route path="*" element={<ProtectedRoute><div>Em desenvolvimento...</div></ProtectedRoute>} />

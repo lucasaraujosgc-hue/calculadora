@@ -2,6 +2,18 @@ import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, LabelList } from 'recharts';
 import { Info } from 'lucide-react';
 import { formatCurrency } from '../utils/format';
+import {
+  ALIQUOTA_REF_CBS,
+  ALIQUOTA_REF_IBS,
+  CRONOGRAMA,
+  REGIMES_DIFERENCIADOS,
+  aliquotasDoAno,
+  apurarIVA,
+  baseDoPrecoPorFora,
+  calcularDASReforma,
+  precoComTributoPorFora,
+  type ClassificacaoReforma,
+} from '../domain/reformaTributaria';
 
 // ---------------------------------------------------------------------------
 // Tabelas oficiais do Simples Nacional (Anexos I a V — LC 123/2006)
@@ -405,6 +417,16 @@ export default function SimuladorImpostos() {
   const [percMonofasicoPresumido, setPercMonofasicoPresumido] = useState(0);
   const [percAliqZeroPresumido, setPercAliqZeroPresumido] = useState(0);
 
+  // Reforma Tributária (EC 132/2023 + LC 214/2025)
+  const [mostrarReforma, setMostrarReforma] = useState(false);
+  const [anoReforma, setAnoReforma] = useState(2027);
+  const [refCbsReforma, setRefCbsReforma] = useState(ALIQUOTA_REF_CBS);
+  const [refIbsReforma, setRefIbsReforma] = useState(ALIQUOTA_REF_IBS);
+  const [classificacaoReforma, setClassificacaoReforma] = useState<ClassificacaoReforma>('padrao');
+  const [comprasCreditoReforma, setComprasCreditoReforma] = useState(0);
+  const [estrategiaPreco, setEstrategiaPreco] = useState<'repassar' | 'absorver'>('repassar');
+  const [simplesForaDoDAS, setSimplesForaDoDAS] = useState(false);
+
   const faturamentoAnual = faturamentoMensal * 12;
 
   const handleAtividadeChange = (val: AtividadePresumido) => {
@@ -503,6 +525,109 @@ export default function SimuladorImpostos() {
   const impostoManual = faturamentoMensal * (aliquotaManual / 100);
   const aliquotaManualEfetiva = aliquotaManual;
 
+  // -------------------------------------------------------------------------
+  // Reforma Tributária — como ficaria a mesma empresa no ano escolhido.
+  // CBS e IBS são calculados por fora: a alíquota incide sobre o valor da
+  // operação sem os próprios tributos, e o resultado é somado ao preço.
+  // -------------------------------------------------------------------------
+  const reforma = useMemo(() => {
+    const aliq = aliquotasDoAno(anoReforma, refCbsReforma, refIbsReforma);
+    const regimeDif = REGIMES_DIFERENCIADOS[classificacaoReforma];
+    const aliquotaPorForaAplicada = (aliq.cbs + aliq.ibs) * regimeDif.fator;
+
+    // "Repassar": o faturamento informado é a receita líquida e o IVA é somado
+    // ao preço (o cliente paga mais). "Absorver": o preço final ao cliente é
+    // mantido e o IVA sai de dentro do faturamento de hoje.
+    const baseVenda = estrategiaPreco === 'repassar'
+      ? faturamentoMensal
+      : baseDoPrecoPorFora(faturamentoMensal, aliquotaPorForaAplicada);
+    const precoFinalCliente = estrategiaPreco === 'repassar'
+      ? precoComTributoPorFora(faturamentoMensal, aliquotaPorForaAplicada)
+      : faturamentoMensal;
+
+    const apuracao = apurarIVA(baseVenda, comprasCreditoReforma, aliq.cbs, aliq.ibs, classificacaoReforma);
+
+    const linhas: { label: string; valor: number }[] = [];
+    let totalReforma: number;
+    let das: ReturnType<typeof calcularDASReforma> | null = null;
+    let anexoReforma = '';
+
+    if (regime === 'simples') {
+      const r = calcularAnexo(baseVenda * 12, anexo, folhaMensal);
+      anexoReforma = r.anexoUsado;
+      const rep = REPARTICAO_SIMPLES[r.anexoUsado][r.faixaIndex];
+      // A monofasia do PIS/COFINS acaba junto com a CBS; o ICMS-ST acompanha o
+      // ICMS e só desaparece quando o imposto é extinto.
+      const redut = calcularRedutorSimples(
+        baseVenda, r.aliquotaEfetiva, r.faixaIndex, r.anexoUsado,
+        aliq.fatorIcmsIss > 0 ? percIcmsEspecialSimplesTotal : 0,
+        aliq.pisCofinsVigente ? percPisCofinsEspecialSimplesTotal : 0
+      );
+      const dasBase = (!ratearAnexos && temRedutorSimplesAtivo)
+        ? redut.dasComReducao
+        : baseVenda * (r.aliquotaEfetiva / 100);
+      das = calcularDASReforma(
+        dasBase, rep.pis + rep.cofins, rep.issIcms,
+        aliq.fatorIcmsIss, aliq.pisCofinsVigente, simplesForaDoDAS
+      );
+      linhas.push({
+        label: simplesForaDoDAS ? 'DAS sem a parcela de CBS/IBS' : 'DAS do Simples Nacional',
+        valor: das.dasFinal,
+      });
+      totalReforma = das.dasFinal;
+      if (simplesForaDoDAS) {
+        linhas.push({ label: 'CBS e IBS apurados por fora do DAS', valor: apuracao.totalARecolher });
+        totalReforma += apuracao.totalARecolher;
+      }
+    } else if (regime === 'presumido') {
+      const pres = calcularPresumido(
+        baseVenda, presuncaoIRPJ, presuncaoCSLL, aliquotaIssIcms, atividadePresumido,
+        percIcmsEspecialPresumidoTotal,
+        aliq.pisCofinsVigente ? percPisCofinsEspecialPresumidoTotal : 0,
+        icmsCreditoCompras * aliq.fatorIcmsIss
+      );
+      const pisCofins = aliq.pisCofinsVigente ? pres.pis + pres.cofins : 0;
+      const icmsIss = pres.issIcms * aliq.fatorIcmsIss;
+      const labelIcmsIss = atividadePresumido === 'comercio' ? 'ICMS' : 'ISS';
+
+      linhas.push({ label: 'IRPJ + CSLL', valor: pres.irpj + pres.csll });
+      if (aliq.pisCofinsVigente) linhas.push({ label: 'PIS + COFINS', valor: pisCofins });
+      if (aliq.fatorIcmsIss > 0) {
+        linhas.push({
+          label: `${labelIcmsIss} (${(aliq.fatorIcmsIss * 100).toFixed(0)}% da alíquota de hoje)`,
+          valor: icmsIss,
+        });
+      }
+      linhas.push({ label: 'CBS e IBS (débito − crédito)', valor: apuracao.totalARecolher });
+      if (encargoPatronalPresumido > 0) {
+        linhas.push({ label: 'Patronal + RAT sobre a folha', valor: encargoPatronalPresumido });
+      }
+      totalReforma = pres.irpj + pres.csll + pisCofins + icmsIss + apuracao.totalARecolher + encargoPatronalPresumido;
+    } else if (regime === 'mei') {
+      linhas.push({ label: 'DAS-MEI (valor fixo)', valor: impostoMEI });
+      totalReforma = impostoMEI;
+    } else {
+      linhas.push({ label: `Tributos informados (${aliquotaManual.toFixed(2)}%)`, valor: impostoManual });
+      linhas.push({ label: 'CBS e IBS (débito − crédito)', valor: apuracao.totalARecolher });
+      totalReforma = impostoManual + apuracao.totalARecolher;
+    }
+
+    const aliquotaEfetivaReforma = faturamentoMensal > 0 ? (totalReforma / faturamentoMensal) * 100 : 0;
+
+    return {
+      aliq, regimeDif, aliquotaPorForaAplicada, baseVenda, precoFinalCliente,
+      apuracao, linhas, totalReforma, aliquotaEfetivaReforma, das, anexoReforma,
+    };
+  }, [
+    anoReforma, refCbsReforma, refIbsReforma, classificacaoReforma, comprasCreditoReforma,
+    estrategiaPreco, faturamentoMensal, regime, anexo, folhaMensal, ratearAnexos,
+    temRedutorSimplesAtivo, percIcmsEspecialSimplesTotal, percPisCofinsEspecialSimplesTotal,
+    simplesForaDoDAS, presuncaoIRPJ, presuncaoCSLL, aliquotaIssIcms, atividadePresumido,
+    percIcmsEspecialPresumidoTotal, percPisCofinsEspecialPresumidoTotal, icmsCreditoCompras,
+    encargoPatronalPresumido, impostoMEI, impostoManual, aliquotaManual,
+  ]);
+
+
   // Dados para o gráfico de comparação entre regimes
   const comparacaoRegimes = [
     { regime: 'MEI', imposto: impostoMEI, aliquota: aliquotaMEI, cor: '#f59e0b' },
@@ -510,6 +635,15 @@ export default function SimuladorImpostos() {
     { regime: 'Lucro Presumido', imposto: impostoPresumido, aliquota: aliquotaPresumido, cor: '#10b981' },
     { regime: 'Manual', imposto: impostoManual, aliquota: aliquotaManualEfetiva, cor: '#ef4444' },
   ];
+
+  if (mostrarReforma) {
+    comparacaoRegimes.push({
+      regime: `Reforma ${anoReforma}`,
+      imposto: reforma.totalReforma,
+      aliquota: reforma.aliquotaEfetivaReforma,
+      cor: '#8b5cf6',
+    });
+  }
 
   // Para o regime selecionado, mostramos o detalhamento
   let impostoPercentual = 0;
@@ -529,16 +663,23 @@ export default function SimuladorImpostos() {
   }
 
   // Regime mais barato entre as opções reais (exclui "Manual", que é só uma
-  // referência digitada pelo usuário, e o MEI quando ele já não é elegível).
+  // referência digitada pelo usuário, o MEI quando ele já não é elegível e a
+  // barra da reforma, que é o mesmo regime em outro ano, não uma alternativa).
   const regimeAtualLabel: Record<string, string> = { mei: 'MEI', simples: 'Simples Nacional', presumido: 'Lucro Presumido', manual: 'Manual' };
   const regimesComparaveis = comparacaoRegimes.filter(r =>
-    r.regime !== 'Manual' && !(r.regime === 'MEI' && faturamentoAnual > LIMITE_ANUAL_MEI)
+    r.regime !== 'Manual'
+    && !r.regime.startsWith('Reforma')
+    && !(r.regime === 'MEI' && faturamentoAnual > LIMITE_ANUAL_MEI)
   );
   const melhorRegime = regimesComparaveis.length > 0
     ? regimesComparaveis.reduce((min, r) => (r.imposto < min.imposto ? r : min))
     : null;
   const economiaVsAtual = melhorRegime ? custoMensal - melhorRegime.imposto : 0;
   const mostrarEconomia = !!melhorRegime && melhorRegime.regime !== regimeAtualLabel[regime] && economiaVsAtual > 0.01;
+
+  // Quanto a reforma muda em relação à carga de hoje, no regime selecionado.
+  const diferencaReforma = reforma.totalReforma - custoMensal;
+  const variacaoReformaPercent = custoMensal > 0 ? (diferencaReforma / custoMensal) * 100 : 0;
 
   // Verifica se deve mostrar aviso de monofásico/substituição
   const mostrarAvisoMonofasico = regime === 'simples' && !temRedutorSimplesAtivo && (
@@ -890,6 +1031,125 @@ export default function SimuladorImpostos() {
               </div>
             </div>
           )}
+
+          {/* ---------------- REFORMA TRIBUTÁRIA ---------------- */}
+          <div className="space-y-4 pt-4 border-t border-border">
+            <div className="flex items-center gap-3">
+              <ToggleSwitch checked={mostrarReforma} onChange={setMostrarReforma} />
+              <span className="text-sm font-medium text-foreground">Simular também com as regras da Reforma Tributária</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              CBS e IBS (EC 132/2023 e LC 214/2025) substituem PIS, COFINS, ICMS e ISS e são calculados <strong>por fora</strong>: a alíquota
+              incide sobre o valor da operação sem os próprios tributos e o resultado é somado ao preço.
+            </p>
+
+            {mostrarReforma && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Ano da simulação</label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {CRONOGRAMA.map(f => (
+                      <button
+                        key={f.ano}
+                        type="button"
+                        onClick={() => setAnoReforma(f.ano)}
+                        className={`py-1.5 px-1 rounded-md border text-xs font-medium ${anoReforma === f.ano ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground border-border hover:bg-muted'}`}
+                      >
+                        {f.ano}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">{reforma.aliq.titulo} — {reforma.aliq.resumo}</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">O que você vai fazer com o preço?</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setEstrategiaPreco('repassar')}
+                      className={`py-2 px-3 rounded-md border text-sm font-medium ${estrategiaPreco === 'repassar' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground border-border hover:bg-muted'}`}
+                    >
+                      Repassar ao cliente
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEstrategiaPreco('absorver')}
+                      className={`py-2 px-3 rounded-md border text-sm font-medium ${estrategiaPreco === 'absorver' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground border-border hover:bg-muted'}`}
+                    >
+                      Manter o preço atual
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {estrategiaPreco === 'repassar'
+                      ? 'O faturamento informado vira a sua receita líquida e CBS/IBS são somados ao preço — o cliente paga mais.'
+                      : 'O preço final ao cliente continua o mesmo e CBS/IBS saem de dentro do faturamento atual — a sua receita líquida cai.'}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">Compras e despesas mensais com crédito de CBS/IBS (R$)</label>
+                  <input
+                    type="number"
+                    value={comprasCreditoReforma}
+                    onChange={e => setComprasCreditoReforma(Number(e.target.value))}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Valor sem os tributos, de tudo que a empresa comprar de fornecedores do regime regular: mercadorias, insumos, energia,
+                    aluguel, softwares, fretes, serviços. Folha de pagamento e compras de optantes pelo Simples dentro do DAS não entram aqui.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">Regime do seu produto ou serviço</label>
+                  <select
+                    value={classificacaoReforma}
+                    onChange={e => setClassificacaoReforma(e.target.value as ClassificacaoReforma)}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
+                  >
+                    {(Object.keys(REGIMES_DIFERENCIADOS) as ClassificacaoReforma[]).map(c => (
+                      <option key={c} value={c}>{REGIMES_DIFERENCIADOS[c].label}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">{reforma.regimeDif.descricao}</p>
+                </div>
+
+                {regime === 'simples' && (
+                  <div className="space-y-2 pt-2 border-t border-border">
+                    <div className="flex items-center gap-3">
+                      <ToggleSwitch checked={simplesForaDoDAS} onChange={setSimplesForaDoDAS} />
+                      <span className="text-sm font-medium text-foreground">Recolher CBS e IBS por fora do DAS</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Opção prevista na LC 214/2025. Fora do DAS, a parcela correspondente sai da guia única, você apura CBS/IBS pelo regime
+                      regular (com crédito das compras) e o seu cliente PJ passa a creditar a alíquota cheia — em vez do crédito reduzido que
+                      a compra de um optante pelo Simples gera.
+                    </p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Alíquota de referência da CBS (%)</label>
+                    <input type="number" step="0.1" value={refCbsReforma} onChange={e => setRefCbsReforma(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Alíquota de referência do IBS (%)</label>
+                    <input type="number" step="0.1" value={refIbsReforma} onChange={e => setRefIbsReforma(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50" />
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800">
+                  <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    As alíquotas de referência (8,8% de CBS e 17,7% de IBS) são estimativas do Ministério da Fazenda e ainda serão fixadas por
+                    Resolução do Senado Federal. Entenda a nova sistemática na aba <strong>Reforma Tributária</strong>.
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Resultados */}
@@ -1035,6 +1295,120 @@ export default function SimuladorImpostos() {
                   <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">Total geral (tributos + encargos)</span><span className="font-semibold text-primary">{formatCurrency(impostoPresumido)}</span></div>
                 </>
               )}
+            </div>
+          )}
+
+          {mostrarReforma && (
+            <div className="bg-card border border-violet-300 p-6 rounded-xl shadow-sm space-y-2">
+              <h3 className="text-lg font-medium text-primary mb-1">
+                Reforma Tributária — {anoReforma} ({reforma.aliq.titulo})
+              </h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                CBS {reforma.aliq.cbs.toFixed(2)}% e IBS {reforma.aliq.ibs.toFixed(2)}% por fora
+                {reforma.regimeDif.fator !== 1 && ` — com o redutor do regime escolhido, ${(reforma.aliq.cbs * reforma.regimeDif.fator).toFixed(2)}% e ${(reforma.aliq.ibs * reforma.regimeDif.fator).toFixed(2)}%`}.
+                {reforma.aliq.fatorIcmsIss > 0 && ` ICMS e ISS ainda valem ${(reforma.aliq.fatorIcmsIss * 100).toFixed(0)}% da alíquota de hoje.`}
+              </p>
+
+              {reforma.aliq.cbsCompensavelComPisCofins && (
+                <p className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-md p-2 mb-2">
+                  Em {anoReforma} a CBS e o IBS são apenas de teste: os valores são compensados com o PIS/COFINS devido e o recolhimento é
+                  dispensado de quem cumprir as obrigações acessórias. Por isso a carga simulada abaixo é a de hoje.
+                </p>
+              )}
+
+              <div className="p-3 bg-muted/40 rounded-lg border border-border space-y-1 mb-3">
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Base de cálculo (receita sem CBS/IBS)</span><span className="font-medium">{formatCurrency(reforma.baseVenda)}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Preço final pago pelo cliente</span><span className="font-medium">{formatCurrency(reforma.precoFinalCliente)}</span></div>
+                <p className="text-xs text-muted-foreground pt-1">
+                  {estrategiaPreco === 'repassar'
+                    ? `Você mantém ${formatCurrency(faturamentoMensal)} de receita líquida e o cliente passa a pagar ${formatCurrency(reforma.precoFinalCliente)}.`
+                    : `O cliente continua pagando ${formatCurrency(faturamentoMensal)} e a sua receita líquida cai para ${formatCurrency(reforma.baseVenda)}.`}
+                </p>
+              </div>
+
+              {reforma.linhas.map(l => (
+                <div key={l.label} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{l.label}</span>
+                  <span className="font-medium">{formatCurrency(l.valor)}</span>
+                </div>
+              ))}
+
+              <div className="flex justify-between text-sm border-t border-border pt-2 mt-2">
+                <span className="text-muted-foreground">Total no mês</span>
+                <span className="font-semibold text-primary">{formatCurrency(reforma.totalReforma)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Hoje, no mesmo cenário</span>
+                <span className="font-medium">{formatCurrency(custoMensal)}</span>
+              </div>
+              <div className={`flex justify-between text-sm font-semibold ${diferencaReforma > 0.005 ? 'text-red-600' : diferencaReforma < -0.005 ? 'text-emerald-700' : 'text-muted-foreground'}`}>
+                <span>{diferencaReforma >= 0 ? 'Aumento' : 'Economia'} no mês</span>
+                <span>{formatCurrency(Math.abs(diferencaReforma))} ({Math.abs(variacaoReformaPercent).toFixed(2)}%)</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {estrategiaPreco === 'repassar'
+                  ? 'Como você está repassando o imposto, essa diferença é paga pelo cliente — a sua receita líquida continua a mesma. Para ver o efeito no seu bolso, escolha “Manter o preço atual”.'
+                  : 'Como você está mantendo o preço, essa diferença sai da sua receita líquida.'}
+              </p>
+
+              {(regime === 'presumido' || regime === 'manual' || (regime === 'simples' && simplesForaDoDAS)) && (
+                <div className="mt-3 p-3 bg-muted/40 rounded-lg border border-border space-y-1">
+                  <p className="text-xs font-medium text-foreground">Apuração de CBS e IBS</p>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">CBS débito ({reforma.apuracao.aliquotaCbsAplicada.toFixed(2)}%)</span><span className="font-medium">{formatCurrency(reforma.apuracao.cbsDebito)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">(–) Crédito de CBS das compras</span><span className="font-medium">{formatCurrency(reforma.apuracao.cbsCredito)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">IBS débito ({reforma.apuracao.aliquotaIbsAplicada.toFixed(2)}%)</span><span className="font-medium">{formatCurrency(reforma.apuracao.ibsDebito)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">(–) Crédito de IBS das compras</span><span className="font-medium">{formatCurrency(reforma.apuracao.ibsCredito)}</span></div>
+                  <div className="flex justify-between text-sm border-t border-border pt-2 mt-2"><span className="text-muted-foreground">CBS + IBS a recolher</span><span className="font-semibold text-primary">{formatCurrency(reforma.apuracao.totalARecolher)}</span></div>
+                  {reforma.apuracao.saldoCredor > 0 && (
+                    <p className="text-xs text-emerald-700 bg-emerald-100 rounded-md p-2 mt-1">
+                      Saldo credor de {formatCurrency(reforma.apuracao.saldoCredor)} — o crédito das compras superou o débito das vendas.
+                      {classificacaoReforma === 'zero' && ' A alíquota zero não anula os créditos, então esse saldo se acumula e pode ser ressarcido.'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {regime === 'simples' && reforma.das && (
+                <div className="mt-3 p-3 bg-muted/40 rounded-lg border border-border space-y-1">
+                  <p className="text-xs font-medium text-foreground">Simples Nacional — {reforma.anexoReforma}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Nesta faixa, {reforma.das.percentualIvaNoDas.toFixed(2)}% do DAS corresponde a CBS/IBS em {anoReforma}.
+                  </p>
+                  {simplesForaDoDAS ? (
+                    <>
+                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Saiu do DAS (parcela da CBS)</span><span className="font-medium">{formatCurrency(reforma.das.parcelaCbsRetirada)}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Saiu do DAS (parcela do IBS)</span><span className="font-medium">{formatCurrency(reforma.das.parcelaIbsRetirada)}</span></div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Dentro do DAS o valor da guia não muda — o que muda é o nome da parcela. Em compensação, o seu cliente PJ credita apenas
+                      o CBS/IBS embutido no DAS. Ative a opção ao lado para comparar.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {regime === 'mei' && (
+                <p className="text-xs text-muted-foreground bg-muted/50 border border-border rounded-md p-2 mt-2">
+                  O MEI continua com DAS fixo e a reforma não altera esse valor. O ponto de atenção é comercial: quem compra do MEI toma
+                  crédito limitado de CBS/IBS, o que pode pesar nas vendas para outras empresas.
+                </p>
+              )}
+
+              {regime === 'manual' && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2 mt-2">
+                  No modo manual, a alíquota que você informou é mantida integralmente e CBS/IBS são somados por cima. Para não contar duas
+                  vezes, retire da alíquota manual o que hoje é PIS/COFINS{reforma.aliq.fatorIcmsIss === 0 ? ', ICMS e ISS' : ''}.
+                </p>
+              )}
+
+              <div className="flex items-start gap-2 p-3 bg-muted/50 rounded-md border border-border text-xs text-muted-foreground mt-3">
+                <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Simulação baseada na EC 132/2023 e na LC 214/2025, com alíquotas de referência estimadas. O enquadramento do seu produto ou
+                  serviço nos anexos da lei muda bastante o resultado — confirme com seu contador antes de reprecificar.
+                </span>
+              </div>
             </div>
           )}
 
