@@ -2,12 +2,16 @@ import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Info, AlertTriangle, ArrowRight, CheckCircle2, Receipt, Scale, ShoppingCart } from 'lucide-react';
 import { formatCurrency } from '../utils/format';
+import { SeletorReducaoLC214 } from '../components/SeletorReducaoLC214';
 import {
   ALIQUOTA_REF_CBS,
   ALIQUOTA_REF_IBS,
   CRONOGRAMA,
+  CATEGORIAS_LC214,
   REGIMES_DIFERENCIADOS,
   aliquotasDoAno,
+  categoriaPorId,
+  fatorDoRegime,
   apurarIVA,
   porDentroParaPorFora,
   porForaParaPorDentro,
@@ -40,7 +44,6 @@ const PIS_COFINS_ATUAL: Record<string, { label: string; aliquota: number; ajuda:
   },
 };
 
-const CLASSIFICACOES: ClassificacaoReforma[] = ['padrao', 'reducao60', 'reducao30', 'zero', 'monofasicoRevenda'];
 
 function Campo({ label, value, onChange, sufixo, ajuda }: {
   label: string;
@@ -81,7 +84,8 @@ export default function ReformaTributaria() {
   // Parâmetros gerais
   const [refCbs, setRefCbs] = useState(ALIQUOTA_REF_CBS);
   const [refIbs, setRefIbs] = useState(ALIQUOTA_REF_IBS);
-  const [classificacao, setClassificacao] = useState<ClassificacaoReforma>('padrao');
+  const [categoriaId, setCategoriaId] = useState('cheia');
+  const [reducaoPersonalizada, setReducaoPersonalizada] = useState(0);
 
   // Simulador de preço
   const [custoLiquido, setCustoLiquido] = useState(100);
@@ -94,7 +98,10 @@ export default function ReformaTributaria() {
   const [aliquotaConversor, setAliquotaConversor] = useState(Number((ALIQUOTA_REF_CBS + ALIQUOTA_REF_IBS).toFixed(2)));
 
   const fase = useMemo(() => aliquotasDoAno(anoSelecionado, refCbs, refIbs), [anoSelecionado, refCbs, refIbs]);
+  const categoria = categoriaPorId(categoriaId);
+  const classificacao: ClassificacaoReforma = categoria.classificacao;
   const regimeDif = REGIMES_DIFERENCIADOS[classificacao];
+  const fatorReducao = fatorDoRegime(classificacao, reducaoPersonalizada);
 
   const aliq2027 = useMemo(() => aliquotasDoAno(2027, refCbs, refIbs), [refCbs, refIbs]);
   const aliq2033 = useMemo(() => aliquotasDoAno(2033, refCbs, refIbs), [refCbs, refIbs]);
@@ -118,10 +125,10 @@ export default function ReformaTributaria() {
       custo: custoLiquido,
       despesasPercent,
       margemPercent,
-      aliquotaPorForaPercent: aliq2027.cbs * regimeDif.fator,
+      aliquotaPorForaPercent: aliq2027.cbs * fatorReducao,
       tributosPorDentroPercent: aliquotaIcmsIss,
     }),
-    [custoLiquido, despesasPercent, margemPercent, aliq2027, regimeDif, aliquotaIcmsIss]
+    [custoLiquido, despesasPercent, margemPercent, aliq2027, fatorReducao, aliquotaIcmsIss]
   );
 
   // --- Cenário 2033: CBS + IBS por fora, sem ICMS/ISS ------------------------
@@ -130,10 +137,10 @@ export default function ReformaTributaria() {
       custo: custoLiquido,
       despesasPercent,
       margemPercent,
-      aliquotaPorForaPercent: aliq2033.totalPorFora * regimeDif.fator,
+      aliquotaPorForaPercent: aliq2033.totalPorFora * fatorReducao,
       tributosPorDentroPercent: 0,
     }),
-    [custoLiquido, despesasPercent, margemPercent, aliq2033, regimeDif]
+    [custoLiquido, despesasPercent, margemPercent, aliq2033, fatorReducao]
   );
 
   const variacao = (novo: number) => (cenarioHoje.precoFinal > 0 ? ((novo - cenarioHoje.precoFinal) / cenarioHoje.precoFinal) * 100 : 0);
@@ -146,8 +153,8 @@ export default function ReformaTributaria() {
 
   // Revenda: quanto de CBS sobra depois do crédito da compra
   const revenda = useMemo(
-    () => apurarIVA(cenario2027.receitaLiquida, custoLiquido, aliq2027.cbs, 0, classificacao),
-    [cenario2027.receitaLiquida, custoLiquido, aliq2027.cbs, classificacao]
+    () => apurarIVA(cenario2027.receitaLiquida, custoLiquido, aliq2027.cbs, 0, classificacao, reducaoPersonalizada),
+    [cenario2027.receitaLiquida, custoLiquido, aliq2027.cbs, classificacao, reducaoPersonalizada]
   );
 
   const equivalentePorDentro = porForaParaPorDentro(aliquotaConversor);
@@ -363,19 +370,13 @@ export default function ReformaTributaria() {
             <Campo label="Margem desejada" sufixo="%" value={margemPercent} onChange={setMargemPercent} />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Regime do seu produto ou serviço na reforma</label>
-            <select
-              value={classificacao}
-              onChange={e => setClassificacao(e.target.value as ClassificacaoReforma)}
-              className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
-            >
-              {CLASSIFICACOES.map(c => (
-                <option key={c} value={c}>{REGIMES_DIFERENCIADOS[c].label}</option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground mt-1">{regimeDif.descricao}</p>
-          </div>
+          <SeletorReducaoLC214
+            categoriaId={categoriaId}
+            reducaoPersonalizada={reducaoPersonalizada}
+            onCategoriaChange={setCategoriaId}
+            onReducaoChange={setReducaoPersonalizada}
+            aliquotaBase={refCbs + refIbs}
+          />
 
           <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
             <Campo
@@ -548,15 +549,16 @@ export default function ReformaTributaria() {
               </tr>
             </thead>
             <tbody>
-              {CLASSIFICACOES.map(c => {
-                const r = REGIMES_DIFERENCIADOS[c];
-                const cbs = aliq2027.cbs * r.fator;
-                const pleno = aliq2033.totalPorFora * r.fator;
+              {CATEGORIAS_LC214.map(c => {
+                const fator = fatorDoRegime(c.classificacao, reducaoPersonalizada);
+                const cbs = aliq2027.cbs * fator;
+                const pleno = aliq2033.totalPorFora * fator;
                 return (
-                  <tr key={c} className={`border-b border-border/60 ${classificacao === c ? 'bg-primary/5' : ''}`}>
+                  <tr key={c.id} className={`border-b border-border/60 ${categoriaId === c.id ? 'bg-primary/5' : ''}`}>
                     <td className="py-2 pr-3">
-                      <span className="font-medium text-foreground">{r.label}</span>
-                      <p className="text-xs text-muted-foreground mt-0.5">{r.descricao}</p>
+                      <span className="font-medium text-foreground">{c.label}</span>
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">{c.grupo}</span>
+                      <p className="text-xs text-muted-foreground mt-0.5">{c.descricao}</p>
                     </td>
                     <td className="py-2 px-3 text-right font-medium whitespace-nowrap">{cbs.toFixed(2)}%</td>
                     <td className="py-2 px-3 text-right font-medium whitespace-nowrap">{pleno.toFixed(2)}%</td>

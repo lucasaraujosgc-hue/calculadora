@@ -11,12 +11,15 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { db } from "./src/db/index.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots, store } from "./src/db/schema.js";
-import { eq, and, gte, desc } from "drizzle-orm";
+import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots, store,
+  fiscalDocuments, fiscalItems } from "./src/db/schema.js";
+import { eq, and, gte, lte, desc } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import multer from "multer";
 import * as XLSX from "xlsx";
+import { ErroNotaFiscal, direcaoDaNota, lerNotaFiscal, somenteDigitos } from "./src/domain/fiscal/nfe.js";
+import { resumirPorProdutoPeriodo, type ItemComContexto } from "./src/domain/fiscal/agregacao.js";
 
 dotenv.config();
 
@@ -300,7 +303,12 @@ app.post("/api/leads", async (req, res) => {
   res.json(newLead[0]);
 });
 
-const registerSchema = z.object({ name: z.string().min(2, "Nome muito curto"), email: z.string().email("E-mail inválido"), phone: z.string().min(8, "Telefone muito curto"), password: z.string().min(6, "Senha muito curta") });
+// CNPJ (14) ou CPF (11), guardado sempre só com os dígitos — é ele que diz,
+// na importação de XML, se a nota é de compra ou de venda.
+const documentoSchema = z.string()
+  .transform(v => v.replace(/\D/g, ""))
+  .refine(v => v.length === 11 || v.length === 14, "Informe um CNPJ (14 dígitos) ou CPF (11 dígitos)");
+const registerSchema = z.object({ name: z.string().min(2, "Nome muito curto"), email: z.string().email("E-mail inválido"), phone: z.string().min(8, "Telefone muito curto"), taxId: documentoSchema.optional(), password: z.string().min(6, "Senha muito curta") });
 const loginSchema = z.object({ email: z.string().email("E-mail inválido"), password: z.string().min(1, "Senha obrigatória") });
 
 app.post("/api/register", authLimiter, async (req, res) => {
@@ -321,6 +329,7 @@ app.post("/api/register", authLimiter, async (req, res) => {
       // While free mode is on, new registrants are granted 'ilimitado'
       // directly so they stay grandfathered once payments come back.
       planId: (isBootstrapAdmin || freeMode) ? 'ilimitado' : 'free',
+      taxId: parsed.taxId ?? null,
       verificationToken,
       isVerified: false
     }).returning();
@@ -557,7 +566,25 @@ app.post("/api/reset-password", authLimiter, async (req, res) => {
 });
 
 app.get("/api/me", requireUser, (req: any, res) => {
-  res.json({ email: req.currentUser.email, name: req.currentUser.name, plan: req.currentUser.planId, role: req.currentUser.role, id: req.currentUser.id });
+  res.json({ email: req.currentUser.email, name: req.currentUser.name, plan: req.currentUser.planId, role: req.currentUser.role, id: req.currentUser.id, taxId: req.currentUser.taxId || null });
+});
+
+// O CNPJ/CPF precisa poder ser preenchido depois do cadastro: quem já tinha
+// conta antes da importação de XML não passou por esse campo.
+app.put("/api/me", requireUser, async (req: any, res) => {
+  try {
+    const bruto = String(req.body.taxId ?? "").trim();
+    const taxId = bruto === "" ? null : documentoSchema.parse(bruto);
+    const atualizado = await db.update(users)
+      .set({ taxId, updatedAt: new Date() })
+      .where(eq(users.id, req.currentUser.id))
+      .returning();
+    const u = atualizado[0];
+    res.json({ success: true, user: { email: u.email, name: u.name, plan: u.planId, role: u.role, id: u.id, taxId: u.taxId || null } });
+  } catch (err: any) {
+    const msgs = err.errors ? err.errors.map((e: any) => e.message).join(", ") : (err.message || "Erro ao salvar o documento");
+    res.status(400).json({ error: msgs });
+  }
 });
 
 app.get("/api/fixed-costs", requireUser, async (req: any, res) => {
@@ -929,6 +956,291 @@ app.post("/api/admin/users/:userId/products/import", requireAdmin, upload.single
   } catch (error) {
     console.error("Erro ao importar planilha (admin):", error);
     res.status(500).json({ error: "Erro ao processar a planilha." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Importação de XML de NF-e
+//
+// A empresa envia os XMLs de compra e de venda misturados; quem separa é o
+// CNPJ/CPF cadastrado: se ela é a emitente da nota, é venda; se é a
+// destinatária, é compra. Tudo é gravado com a competência (AAAA-MM) da data de
+// emissão, porque o mesmo produto muda de preço de um mês para o outro.
+// ---------------------------------------------------------------------------
+
+const uploadXml = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 300 },
+});
+
+app.post("/api/fiscal/import", requireUser, uploadXml.array("files", 300), async (req: any, res) => {
+  const documentoEmpresa = somenteDigitos(req.currentUser.taxId);
+  if (documentoEmpresa.length !== 11 && documentoEmpresa.length !== 14) {
+    return res.status(400).json({
+      error: "Cadastre o CNPJ ou CPF da sua empresa em Minha Conta antes de importar notas.",
+      faltaDocumento: true,
+    });
+  }
+
+  const arquivos: any[] = req.files || [];
+  if (arquivos.length === 0) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+
+  const importadas: any[] = [];
+  const ignoradas: { arquivo: string; motivo: string }[] = [];
+
+  // As chaves já gravadas evitam recontar a mesma nota em uma reimportação.
+  const jaImportadas = new Set(
+    (await db.select({ chave: fiscalDocuments.chave })
+      .from(fiscalDocuments)
+      .where(eq(fiscalDocuments.userId, req.currentUser.id)))
+      .map((d: any) => d.chave)
+  );
+
+  for (const arquivo of arquivos) {
+    const nomeArquivo = arquivo.originalname || "arquivo.xml";
+    try {
+      const nota = lerNotaFiscal(arquivo.buffer.toString("utf8"));
+      if (jaImportadas.has(nota.chave)) {
+        ignoradas.push({ arquivo: nomeArquivo, motivo: "Nota já importada antes." });
+        continue;
+      }
+      const { direcao, motivo } = direcaoDaNota(nota, documentoEmpresa);
+
+      await db.transaction(async (tx: any) => {
+        const inserida = await tx.insert(fiscalDocuments).values({
+          userId: req.currentUser.id,
+          chave: nota.chave,
+          direcao,
+          modelo: nota.modelo,
+          numero: nota.numero,
+          serie: nota.serie,
+          dataEmissao: new Date(nota.dataEmissao),
+          competencia: nota.competencia,
+          naturezaOperacao: nota.naturezaOperacao,
+          emitenteDoc: nota.emitente.doc || null,
+          emitenteNome: nota.emitente.nome,
+          destinatarioDoc: nota.destinatario.doc || null,
+          destinatarioNome: nota.destinatario.nome,
+          valorTotal: nota.valorTotal,
+          nomeArquivo,
+        }).returning();
+
+        const documentId = inserida[0].id;
+        for (const item of nota.itens) {
+          await tx.insert(fiscalItems).values({
+            documentId,
+            userId: req.currentUser.id,
+            direcao,
+            competencia: nota.competencia,
+            numero: item.numero,
+            codigo: item.codigo,
+            ean: item.ean,
+            descricao: item.descricao,
+            ncm: item.ncm,
+            cfop: item.cfop,
+            unidade: item.unidade,
+            natureza: item.natureza,
+            quantidade: item.quantidade,
+            valorUnitario: item.valorUnitario,
+            valorProduto: item.valorProduto,
+            desconto: item.desconto,
+            frete: item.frete,
+            seguro: item.seguro,
+            outros: item.outros,
+            icms: item.icms,
+            icmsSt: item.icmsSt,
+            ipi: item.ipi,
+            pis: item.pis,
+            cofins: item.cofins,
+            valorLiquido: item.valorLiquido,
+            chaveProduto: item.chaveProduto,
+            origemChave: item.origemChave,
+          });
+        }
+      });
+
+      jaImportadas.add(nota.chave);
+      importadas.push({
+        chave: nota.chave,
+        numero: nota.numero,
+        direcao,
+        motivo,
+        competencia: nota.competencia,
+        itens: nota.itens.length,
+        valorTotal: nota.valorTotal,
+      });
+    } catch (err: any) {
+      const motivo = err instanceof ErroNotaFiscal ? err.message : "Não foi possível ler este XML.";
+      ignoradas.push({ arquivo: nomeArquivo, motivo });
+    }
+  }
+
+  res.json({
+    success: true,
+    importadas,
+    ignoradas,
+    totalCompras: importadas.filter(n => n.direcao === "compra").length,
+    totalVendas: importadas.filter(n => n.direcao === "venda").length,
+  });
+});
+
+/** Resumo por produto e competência, que alimenta a análise de preços. */
+app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
+  const de = typeof req.query.de === "string" && /^\d{4}-\d{2}$/.test(req.query.de) ? req.query.de : undefined;
+  const ate = typeof req.query.ate === "string" && /^\d{4}-\d{2}$/.test(req.query.ate) ? req.query.ate : undefined;
+
+  const filtros: any[] = [eq(fiscalItems.userId, req.currentUser.id)];
+  if (de) filtros.push(gte(fiscalItems.competencia, de));
+  if (ate) filtros.push(lte(fiscalItems.competencia, ate));
+
+  const linhas = await db.select().from(fiscalItems).where(and(...filtros));
+
+  const itens: ItemComContexto[] = linhas.map((l: any) => ({
+    direcao: l.direcao,
+    competencia: l.competencia,
+    item: {
+      numero: l.numero,
+      codigo: l.codigo || "",
+      ean: l.ean || "",
+      descricao: l.descricao,
+      ncm: l.ncm || "",
+      cfop: l.cfop || "",
+      unidade: l.unidade || "",
+      quantidade: l.quantidade,
+      valorUnitario: l.valorUnitario,
+      valorProduto: l.valorProduto,
+      desconto: l.desconto,
+      frete: l.frete,
+      seguro: l.seguro,
+      outros: l.outros,
+      icms: l.icms,
+      icmsSt: l.icmsSt,
+      ipi: l.ipi,
+      pis: l.pis,
+      cofins: l.cofins,
+      natureza: l.natureza,
+      valorLiquido: l.valorLiquido,
+      valorUnitarioLiquido: l.quantidade > 0 ? l.valorLiquido / l.quantidade : 0,
+      chaveProduto: l.chaveProduto,
+      origemChave: l.origemChave,
+    },
+  }));
+
+  const competencias = [...new Set(linhas.map((l: any) => l.competencia))].sort();
+  res.json({ competencias, produtos: resumirPorProdutoPeriodo(itens) });
+});
+
+/** Notas importadas, da mais recente para a mais antiga. */
+app.get("/api/fiscal/documentos", requireUser, async (req: any, res) => {
+  const docs = await db.select().from(fiscalDocuments)
+    .where(eq(fiscalDocuments.userId, req.currentUser.id))
+    .orderBy(desc(fiscalDocuments.dataEmissao));
+  res.json(docs.map((d: any) => ({
+    id: d.id,
+    chave: d.chave,
+    direcao: d.direcao,
+    numero: d.numero,
+    serie: d.serie,
+    competencia: d.competencia,
+    dataEmissao: d.dataEmissao,
+    naturezaOperacao: d.naturezaOperacao,
+    participante: d.direcao === "compra" ? d.emitenteNome : d.destinatarioNome,
+    valorTotal: d.valorTotal,
+    nomeArquivo: d.nomeArquivo,
+  })));
+});
+
+app.delete("/api/fiscal/documentos/:id", requireUser, async (req: any, res) => {
+  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (!uuidRegex.test(req.params.id)) return res.status(400).json({ error: "Identificador inválido." });
+  await db.transaction(async (tx: any) => {
+    await tx.delete(fiscalItems).where(and(
+      eq(fiscalItems.documentId, req.params.id as any),
+      eq(fiscalItems.userId, req.currentUser.id)
+    ));
+    await tx.delete(fiscalDocuments).where(and(
+      eq(fiscalDocuments.id, req.params.id as any),
+      eq(fiscalDocuments.userId, req.currentUser.id)
+    ));
+  });
+  res.json({ success: true });
+});
+
+/** Apaga tudo que foi importado — útil para recomeçar do zero. */
+app.delete("/api/fiscal/documentos", requireUser, async (req: any, res) => {
+  await db.transaction(async (tx: any) => {
+    await tx.delete(fiscalItems).where(eq(fiscalItems.userId, req.currentUser.id));
+    await tx.delete(fiscalDocuments).where(eq(fiscalDocuments.userId, req.currentUser.id));
+  });
+  res.json({ success: true });
+});
+
+/**
+ * Aplica ao cadastro de produtos os valores apurados na competência escolhida.
+ * Produtos que já existem (mesmo nome) são atualizados; os que não existem são
+ * criados, respeitando o limite do plano.
+ */
+app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
+  try {
+    const escolhas: any[] = Array.isArray(req.body?.produtos) ? req.body.produtos : [];
+    if (escolhas.length === 0) return res.status(400).json({ error: "Nenhum produto selecionado." });
+
+    const plan = PLANS[req.currentUser.planId as PlanId] || PLANS.basico;
+    const existentes = await db.select().from(products)
+      .where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
+
+    const porNome = new Map<string, any>();
+    for (const p of existentes) porNome.set(String(p.name).trim().toLowerCase(), p);
+
+    let criados = 0;
+    let atualizados = 0;
+    const semEspaco: string[] = [];
+
+    for (const escolha of escolhas) {
+      const nome = String(escolha.nome ?? "").trim();
+      if (!nome) continue;
+      const cmv = Number(escolha.cmv) || 0;
+      const precoVenda = Number(escolha.precoVenda) || 0;
+      const vendasProjetadas = Number(escolha.vendasProjetadas) || 0;
+      const existente = porNome.get(nome.toLowerCase());
+
+      if (existente) {
+        // Só sobrescreve o que a importação de fato apurou: um produto sem
+        // compra no período não pode zerar o CMV que já estava cadastrado.
+        const patch: any = {};
+        if (cmv > 0) patch.costPrice = cmv;
+        if (precoVenda > 0) {
+          patch.salePrice = precoVenda;
+          patch.precoFixo = precoVenda;
+          patch.modoPrecificacao = "preco";
+        }
+        if (vendasProjetadas > 0) patch.projectedSales = vendasProjetadas;
+        if (Object.keys(patch).length === 0) continue;
+        await db.update(products).set(patch)
+          .where(and(eq(products.id, existente.id), eq(products.userId, req.currentUser.id)));
+        atualizados += 1;
+      } else {
+        if (existentes.length + criados >= plan.productLimit) {
+          semEspaco.push(nome);
+          continue;
+        }
+        await db.insert(products).values({
+          userId: req.currentUser.id,
+          name: nome,
+          costPrice: cmv,
+          salePrice: precoVenda,
+          projectedSales: vendasProjetadas,
+          precoFixo: precoVenda,
+          modoPrecificacao: precoVenda > 0 ? "preco" : "margem",
+          isSample: false,
+        });
+        criados += 1;
+      }
+    }
+
+    res.json({ success: true, criados, atualizados, semEspaco });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Erro ao aplicar os valores das notas." });
   }
 });
 

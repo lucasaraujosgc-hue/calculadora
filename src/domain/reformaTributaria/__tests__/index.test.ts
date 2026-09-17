@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   ALIQUOTA_REF_CBS,
   ALIQUOTA_REF_IBS,
+  CATEGORIAS_LC214,
+  GRUPOS_REDUCAO,
+  REGIMES_DIFERENCIADOS,
+  categoriaPorId,
+  fatorDoRegime,
   PRESETS_REGIME,
   parcelaPisCofins,
   projetarPrecoReforma,
@@ -303,5 +308,73 @@ describe('Projeção de preço na reforma', () => {
   it('devolve zero quando as deduções consomem todo o preço', () => {
     const r = projetarPrecoReforma({ ...base, margemPercent: 90 });
     expect(r.precoMantendoMargem).toBe(0);
+  });
+});
+
+describe('Reduções da LC 214/2025', () => {
+  it('cada categoria aponta para um comportamento de cálculo conhecido', () => {
+    for (const c of CATEGORIAS_LC214) {
+      expect(REGIMES_DIFERENCIADOS[c.classificacao]).toBeDefined();
+      expect(GRUPOS_REDUCAO).toContain(c.grupo);
+    }
+  });
+
+  it('os grupos batem com o redutor que aplicam', () => {
+    const fatorPorGrupo: Record<string, number> = {
+      'Alíquota cheia': 1,
+      'Redução de 60%': 0.4,
+      'Redução de 30%': 0.7,
+      'Alíquota zero': 0,
+    };
+    for (const c of CATEGORIAS_LC214) {
+      const esperado = fatorPorGrupo[c.grupo];
+      if (esperado !== undefined) {
+        expect(fatorDoRegime(c.classificacao)).toBeCloseTo(esperado, 10);
+      }
+    }
+  });
+
+  it('a redução personalizada vira fator', () => {
+    expect(fatorDoRegime('personalizado', 0)).toBe(1);
+    expect(fatorDoRegime('personalizado', 45)).toBeCloseTo(0.55, 10);
+    expect(fatorDoRegime('personalizado', 100)).toBe(0);
+  });
+
+  it('a redução personalizada é limitada entre 0% e 100%', () => {
+    expect(fatorDoRegime('personalizado', -20)).toBe(1);
+    expect(fatorDoRegime('personalizado', 150)).toBe(0);
+  });
+
+  it('a redução personalizada não afeta as categorias fixas', () => {
+    expect(fatorDoRegime('reducao60', 90)).toBeCloseTo(0.4, 10);
+  });
+
+  it('a apuração aplica a redução personalizada na saída', () => {
+    const r = apurarIVA(100000, 0, 10, 0, 'personalizado', 45);
+    expect(r.aliquotaCbsAplicada).toBeCloseTo(5.5, 10);
+    expect(r.cbsDebito).toBeCloseTo(5500, 10);
+  });
+
+  it('a redução personalizada mantém o crédito das compras', () => {
+    const r = apurarIVA(100000, 50000, 10, 0, 'personalizado', 100);
+    expect(r.cbsDebito).toBe(0);
+    expect(r.cbsCredito).toBeCloseTo(5000, 10);
+    expect(r.saldoCredor).toBeCloseTo(5000, 10);
+  });
+
+  it('a projeção de preço respeita a redução personalizada', () => {
+    const base = {
+      cmv: 100, custoFixoUnitario: 0, impostoPercent: 21.65, pisCofinsPercent: 3.65,
+      despesasPercent: 0, margemPercent: 20, aliquotaCbs: 10,
+      classificacao: 'personalizado' as const, percCmvComCredito: 0, precoAtual: 100,
+    };
+    expect(projetarPrecoReforma({ ...base, reducaoPersonalizadaPercent: 0 }).aliquotaCbsAplicada).toBeCloseTo(10, 10);
+    expect(projetarPrecoReforma({ ...base, reducaoPersonalizadaPercent: 60 }).aliquotaCbsAplicada).toBeCloseTo(4, 10);
+  });
+
+  it('categoriaPorId cai na alíquota cheia quando o id não existe', () => {
+    expect(categoriaPorId('inexistente').classificacao).toBe('padrao');
+    expect(categoriaPorId('cestaBasica').classificacao).toBe('zero');
+    expect(categoriaPorId('profissoes').classificacao).toBe('reducao30');
   });
 });

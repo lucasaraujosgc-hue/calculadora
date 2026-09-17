@@ -8,6 +8,8 @@ export type User = {
   isActivated?: boolean;
   plan?: string | null;
   productLimit?: number;
+  /** CNPJ ou CPF da empresa, só dígitos. Usado para classificar os XMLs de nota. */
+  taxId?: string | null;
 };
 
 export type CustoFixoItem = {
@@ -48,6 +50,7 @@ type AppContextType = {
   isGuest: boolean;
   setGuestMode: (v: boolean) => void;
   freeModeEnabled: boolean;
+  salvarDocumentoEmpresa: (taxId: string) => Promise<void>;
 
   custosFixos: CustoFixoItem[];
   setCustosFixos: (cf: CustoFixoItem[]) => void;
@@ -207,6 +210,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsGuest(v);
   };
 
+  // O CNPJ/CPF fica junto do usuário porque é ele que separa compra de venda na
+  // importação de XML. Guardamos também no storage local para a tela não
+  // esquecer o valor num recarregamento.
+  const salvarDocumentoEmpresa = async (taxId: string) => {
+    const res = await fetch('/api/me', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taxId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao salvar o CNPJ/CPF');
+    setUser(prev => {
+      const atualizado = { ...(prev as User), ...data.user };
+      const storage = localStorage.getItem('vc_user') ? localStorage : sessionStorage;
+      try { storage.setItem('vc_user', JSON.stringify(atualizado)); } catch { /* storage bloqueado */ }
+      return atualizado;
+    });
+  };
+
   
   const fetchSnapshots = async () => {
     if (user && !isGuest) {
@@ -327,7 +349,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      user, login, logout, isGuest, setGuestMode, freeModeEnabled,
+      user, login, logout, isGuest, setGuestMode, freeModeEnabled, salvarDocumentoEmpresa,
       custosFixos, setCustosFixos,
       produtos, setProdutos,
       saveProduto, removeProduto, syncProdutos,

@@ -16,6 +16,7 @@ export default function AuthScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [taxId, setTaxId] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -76,7 +77,9 @@ export default function AuthScreen() {
     }
     
     if (isRegistering) {
-       if (!name || !email || !phone || !password || !confirmPassword) return setErrorMsg('Preencha todos os campos');
+       if (!name || !email || !phone || !taxId || !password || !confirmPassword) return setErrorMsg('Preencha todos os campos');
+       const digitos = taxId.replace(/\D/g, '');
+       if (digitos.length !== 11 && digitos.length !== 14) return setErrorMsg('Informe um CNPJ (14 dígitos) ou CPF (11 dígitos)');
        if (password.length < 6) return setErrorMsg('A senha deve ter pelo menos 6 caracteres');
        if (password !== confirmPassword) return setErrorMsg('As senhas não coincidem');
 
@@ -85,7 +88,7 @@ export default function AuthScreen() {
          const res = await fetch('/api/register', {
            method: 'POST',
            headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ name, email, phone, password }),
+           body: JSON.stringify({ name, email, phone, taxId: taxId.replace(/\D/g, ''), password }),
          });
          
          const data = await res.json();
@@ -230,6 +233,19 @@ export default function AuthScreen() {
                       className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
                       placeholder="(00) 00000-0000"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">CNPJ ou CPF da empresa</label>
+                    <input
+                      type="text"
+                      value={taxId}
+                      onChange={e => {setTaxId(e.target.value); setErrorMsg('');}}
+                      className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      placeholder="00.000.000/0000-00"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      É por ele que o sistema separa, nos XMLs que você importar, o que é compra do que é venda.
+                    </p>
                   </div>
                 </>
               )}

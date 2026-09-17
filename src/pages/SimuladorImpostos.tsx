@@ -2,11 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, LabelList } from 'recharts';
 import { Info } from 'lucide-react';
 import { formatCurrency } from '../utils/format';
+import { SeletorReducaoLC214 } from '../components/SeletorReducaoLC214';
 import {
   ALIQUOTA_REF_CBS,
   ALIQUOTA_REF_IBS,
   CRONOGRAMA,
   REGIMES_DIFERENCIADOS,
+  categoriaPorId,
+  fatorDoRegime,
   REPARTICAO_SIMPLES,
   aliquotasDoAno,
   apurarIVA,
@@ -372,7 +375,8 @@ export default function SimuladorImpostos() {
   const [anoReforma, setAnoReforma] = useState(2027);
   const [refCbsReforma, setRefCbsReforma] = useState(ALIQUOTA_REF_CBS);
   const [refIbsReforma, setRefIbsReforma] = useState(ALIQUOTA_REF_IBS);
-  const [classificacaoReforma, setClassificacaoReforma] = useState<ClassificacaoReforma>('padrao');
+  const [categoriaReforma, setCategoriaReforma] = useState('cheia');
+  const [reducaoPersonalizada, setReducaoPersonalizada] = useState(0);
   const [comprasCreditoReforma, setComprasCreditoReforma] = useState(0);
   const [estrategiaPreco, setEstrategiaPreco] = useState<'repassar' | 'absorver'>('repassar');
   const [simplesForaDoDAS, setSimplesForaDoDAS] = useState(false);
@@ -482,8 +486,10 @@ export default function SimuladorImpostos() {
   // -------------------------------------------------------------------------
   const reforma = useMemo(() => {
     const aliq = aliquotasDoAno(anoReforma, refCbsReforma, refIbsReforma);
+    const classificacaoReforma = categoriaPorId(categoriaReforma).classificacao;
     const regimeDif = REGIMES_DIFERENCIADOS[classificacaoReforma];
-    const aliquotaPorForaAplicada = (aliq.cbs + aliq.ibs) * regimeDif.fator;
+    const fator = fatorDoRegime(classificacaoReforma, reducaoPersonalizada);
+    const aliquotaPorForaAplicada = (aliq.cbs + aliq.ibs) * fator;
 
     // "Repassar": o faturamento informado é a receita líquida e o IVA é somado
     // ao preço (o cliente paga mais). "Absorver": o preço final ao cliente é
@@ -495,7 +501,7 @@ export default function SimuladorImpostos() {
       ? precoComTributoPorFora(faturamentoMensal, aliquotaPorForaAplicada)
       : faturamentoMensal;
 
-    const apuracao = apurarIVA(baseVenda, comprasCreditoReforma, aliq.cbs, aliq.ibs, classificacaoReforma);
+    const apuracao = apurarIVA(baseVenda, comprasCreditoReforma, aliq.cbs, aliq.ibs, classificacaoReforma, reducaoPersonalizada);
 
     const linhas: { label: string; valor: number }[] = [];
     let totalReforma: number;
@@ -565,11 +571,11 @@ export default function SimuladorImpostos() {
     const aliquotaEfetivaReforma = faturamentoMensal > 0 ? (totalReforma / faturamentoMensal) * 100 : 0;
 
     return {
-      aliq, regimeDif, aliquotaPorForaAplicada, baseVenda, precoFinalCliente,
+      aliq, regimeDif, fator, classificacaoReforma, aliquotaPorForaAplicada, baseVenda, precoFinalCliente,
       apuracao, linhas, totalReforma, aliquotaEfetivaReforma, das, anexoReforma,
     };
   }, [
-    anoReforma, refCbsReforma, refIbsReforma, classificacaoReforma, comprasCreditoReforma,
+    anoReforma, refCbsReforma, refIbsReforma, categoriaReforma, reducaoPersonalizada, comprasCreditoReforma,
     estrategiaPreco, faturamentoMensal, regime, anexo, folhaMensal, ratearAnexos,
     temRedutorSimplesAtivo, percIcmsEspecialSimplesTotal, percPisCofinsEspecialSimplesTotal,
     simplesForaDoDAS, presuncaoIRPJ, presuncaoCSLL, aliquotaIssIcms, atividadePresumido,
@@ -1060,19 +1066,13 @@ export default function SimuladorImpostos() {
                   </p>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-1">Regime do seu produto ou serviço</label>
-                  <select
-                    value={classificacaoReforma}
-                    onChange={e => setClassificacaoReforma(e.target.value as ClassificacaoReforma)}
-                    className="w-full px-3 py-2 border border-border rounded-md bg-background focus:ring-2 focus:ring-primary/50"
-                  >
-                    {(Object.keys(REGIMES_DIFERENCIADOS) as ClassificacaoReforma[]).map(c => (
-                      <option key={c} value={c}>{REGIMES_DIFERENCIADOS[c].label}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-muted-foreground mt-1">{reforma.regimeDif.descricao}</p>
-                </div>
+                <SeletorReducaoLC214
+                  categoriaId={categoriaReforma}
+                  reducaoPersonalizada={reducaoPersonalizada}
+                  onCategoriaChange={setCategoriaReforma}
+                  onReducaoChange={setReducaoPersonalizada}
+                  aliquotaBase={reforma.aliq.cbs + reforma.aliq.ibs}
+                />
 
                 {regime === 'simples' && (
                   <div className="space-y-2 pt-2 border-t border-border">
@@ -1264,7 +1264,7 @@ export default function SimuladorImpostos() {
               </h3>
               <p className="text-xs text-muted-foreground mb-3">
                 CBS {reforma.aliq.cbs.toFixed(2)}% e IBS {reforma.aliq.ibs.toFixed(2)}% por fora
-                {reforma.regimeDif.fator !== 1 && ` — com o redutor do regime escolhido, ${(reforma.aliq.cbs * reforma.regimeDif.fator).toFixed(2)}% e ${(reforma.aliq.ibs * reforma.regimeDif.fator).toFixed(2)}%`}.
+                {reforma.fator !== 1 && ` — com o redutor do enquadramento escolhido, ${(reforma.aliq.cbs * reforma.fator).toFixed(2)}% e ${(reforma.aliq.ibs * reforma.fator).toFixed(2)}%`}.
                 {reforma.aliq.fatorIcmsIss > 0 && ` ICMS e ISS ainda valem ${(reforma.aliq.fatorIcmsIss * 100).toFixed(0)}% da alíquota de hoje.`}
               </p>
 
@@ -1321,7 +1321,7 @@ export default function SimuladorImpostos() {
                   {reforma.apuracao.saldoCredor > 0 && (
                     <p className="text-xs text-emerald-700 bg-emerald-100 rounded-md p-2 mt-1">
                       Saldo credor de {formatCurrency(reforma.apuracao.saldoCredor)} — o crédito das compras superou o débito das vendas.
-                      {classificacaoReforma === 'zero' && ' A alíquota zero não anula os créditos, então esse saldo se acumula e pode ser ressarcido.'}
+                      {reforma.classificacaoReforma === 'zero' && ' A alíquota zero não anula os créditos, então esse saldo se acumula e pode ser ressarcido.'}
                     </p>
                   )}
                 </div>

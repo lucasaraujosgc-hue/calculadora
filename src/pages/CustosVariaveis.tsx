@@ -3,6 +3,7 @@ import { Plus, Trash2, Lock, Upload, Edit, Save, X, Search, ArrowUpDown, ArrowUp
 import { useAppContext } from '../context/AppContext';
 import { Link } from 'react-router-dom';
 import { formatCurrency } from '../utils/format';
+import ImportadorXmlNfe from '../components/ImportadorXmlNfe';
 
 export default function CustosVariaveis() {
   const { user, produtos, setProdutos, saveProduto, removeProduto, isGuest, freeModeEnabled } = useAppContext();
@@ -203,6 +204,8 @@ export default function CustosVariaveis() {
           </div>
         </div>
       </div>
+
+      <ImportadorXmlNfe />
 
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden mt-6">
          <div className="p-6 border-b border-border bg-muted/30">

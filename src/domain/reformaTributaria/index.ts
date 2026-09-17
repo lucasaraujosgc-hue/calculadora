@@ -42,7 +42,8 @@ export type ClassificacaoReforma =
   | 'reducao60'
   | 'reducao30'
   | 'zero'
-  | 'monofasicoRevenda';
+  | 'monofasicoRevenda'
+  | 'personalizado';
 
 export interface RegimeDiferenciado {
   label: string;
@@ -98,7 +99,195 @@ export const REGIMES_DIFERENCIADOS: Record<ClassificacaoReforma, RegimeDiferenci
     descricao:
       'Nos combustíveis, CBS e IBS são cobrados uma única vez, com alíquotas por unidade de medida (ad rem), na operação do produtor/importador. As revendas seguintes saem com alíquota zero e o revendedor não toma crédito daquela aquisição.',
   },
+  personalizado: {
+    // O fator real vem de `fatorDoRegime`, a partir da redução que o usuário digita.
+    label: 'Redução personalizada',
+    fator: 1,
+    mantemCredito: true,
+    descricao:
+      'Informe você mesmo o percentual de redução da alíquota, para enquadramentos específicos ou para testar um cenário que ainda está em discussão.',
+  },
 };
+
+/**
+ * Fator multiplicador da alíquota, considerando a redução personalizada quando
+ * o regime escolhido é `personalizado`.
+ *
+ * Ex.: uma redução de 60% devolve 0,4 — a alíquota cai para 40% da referência.
+ */
+export function fatorDoRegime(
+  classificacao: ClassificacaoReforma,
+  reducaoPersonalizadaPercent = 0
+): number {
+  if (classificacao !== 'personalizado') return REGIMES_DIFERENCIADOS[classificacao].fator;
+  const reducao = Math.min(100, Math.max(0, reducaoPersonalizadaPercent));
+  return 1 - reducao / 100;
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo de reduções da LC 214/2025
+// ---------------------------------------------------------------------------
+
+export type GrupoReducao =
+  | 'Alíquota cheia'
+  | 'Redução de 60%'
+  | 'Redução de 30%'
+  | 'Alíquota zero'
+  | 'Regimes específicos'
+  | 'Personalizado';
+
+export interface CategoriaLC214 {
+  id: string;
+  label: string;
+  grupo: GrupoReducao;
+  /** Como essa categoria se comporta no cálculo. */
+  classificacao: ClassificacaoReforma;
+  descricao: string;
+}
+
+/**
+ * As hipóteses de redução previstas na LC 214/2025, agrupadas pelo tamanho do
+ * redutor. Cada categoria aponta para o comportamento de cálculo correspondente
+ * — o que muda entre elas é o enquadramento, não a conta.
+ *
+ * O enquadramento exato depende dos anexos da lei e do NCM/NBS do item; a lista
+ * serve para a empresa se localizar, não para substituir a análise do contador.
+ */
+export const CATEGORIAS_LC214: CategoriaLC214[] = [
+  {
+    id: 'cheia',
+    label: 'Alíquota cheia (regra geral)',
+    grupo: 'Alíquota cheia',
+    classificacao: 'padrao',
+    descricao: 'Nenhuma redução: alíquota de referência integral, com crédito amplo sobre tudo que for adquirido para a atividade.',
+  },
+  {
+    id: 'alimentos',
+    label: 'Alimentos destinados ao consumo humano',
+    grupo: 'Redução de 60%',
+    classificacao: 'reducao60',
+    descricao: 'Alimentos in natura e industrializados destinados ao consumo humano que não estejam na Cesta Básica Nacional.',
+  },
+  {
+    id: 'higiene',
+    label: 'Produtos de higiene pessoal e limpeza',
+    grupo: 'Redução de 60%',
+    classificacao: 'reducao60',
+    descricao: 'Produtos de higiene pessoal e de limpeza majoritariamente consumidos por famílias de baixa renda.',
+  },
+  {
+    id: 'saude',
+    label: 'Serviços de saúde e dispositivos médicos',
+    grupo: 'Redução de 60%',
+    classificacao: 'reducao60',
+    descricao: 'Serviços de saúde humana, dispositivos médicos, de acessibilidade para pessoas com deficiência e medicamentos não listados na alíquota zero.',
+  },
+  {
+    id: 'educacao',
+    label: 'Serviços de educação',
+    grupo: 'Redução de 60%',
+    classificacao: 'reducao60',
+    descricao: 'Educação infantil, ensino fundamental, médio, superior e profissional, nos termos dos anexos da lei.',
+  },
+  {
+    id: 'agro',
+    label: 'Insumos agropecuários e aquícolas',
+    grupo: 'Redução de 60%',
+    classificacao: 'reducao60',
+    descricao: 'Fertilizantes, defensivos, sementes, rações, medicamentos veterinários e demais insumos da produção rural.',
+  },
+  {
+    id: 'transporteColetivo',
+    label: 'Transporte coletivo de passageiros',
+    grupo: 'Redução de 60%',
+    classificacao: 'reducao60',
+    descricao: 'Transporte rodoviário, ferroviário, hidroviário e aéreo coletivo de passageiros de caráter intermunicipal e interestadual.',
+  },
+  {
+    id: 'cultura',
+    label: 'Produções artísticas, culturais, jornalísticas e desportivas',
+    grupo: 'Redução de 60%',
+    classificacao: 'reducao60',
+    descricao: 'Produção e distribuição de conteúdo artístico, cultural, de eventos, jornalístico e desportivo nacionais.',
+  },
+  {
+    id: 'bensImobiliarios',
+    label: 'Serviços de comunicação institucional e bens imobiliários',
+    grupo: 'Redução de 60%',
+    classificacao: 'reducao60',
+    descricao: 'Hipóteses de redução de 60% aplicáveis a comunicação institucional e a determinadas operações com bens imóveis.',
+  },
+  {
+    id: 'profissoes',
+    label: 'Profissões intelectuais regulamentadas',
+    grupo: 'Redução de 30%',
+    classificacao: 'reducao30',
+    descricao: 'Advocacia, medicina, engenharia, contabilidade, arquitetura, odontologia e demais profissões regulamentadas, prestadas por sociedade uniprofissional.',
+  },
+  {
+    id: 'cestaBasica',
+    label: 'Cesta Básica Nacional de Alimentos',
+    grupo: 'Alíquota zero',
+    classificacao: 'zero',
+    descricao: 'Itens da Cesta Básica Nacional de Alimentos. A alíquota zero não anula os créditos das compras — o saldo credor se acumula e pode ser ressarcido.',
+  },
+  {
+    id: 'hortifruti',
+    label: 'Hortícolas, frutas e ovos',
+    grupo: 'Alíquota zero',
+    classificacao: 'zero',
+    descricao: 'Produtos hortícolas, frutas e ovos frescos ou refrigerados, nos termos do anexo da lei.',
+  },
+  {
+    id: 'medicamentosZero',
+    label: 'Medicamentos e dispositivos listados em anexo',
+    grupo: 'Alíquota zero',
+    classificacao: 'zero',
+    descricao: 'Medicamentos registrados na Anvisa e dispositivos médicos e de acessibilidade especificamente listados com alíquota zero.',
+  },
+  {
+    id: 'prouni',
+    label: 'Educação superior — Prouni',
+    grupo: 'Alíquota zero',
+    classificacao: 'zero',
+    descricao: 'Serviços de educação de ensino superior prestados por instituição aderente ao Prouni, na proporção das bolsas.',
+  },
+  {
+    id: 'transportePublico',
+    label: 'Transporte público coletivo urbano',
+    grupo: 'Alíquota zero',
+    classificacao: 'zero',
+    descricao: 'Transporte público coletivo de passageiros rodoviário, metroviário e hidroviário de caráter urbano, semiurbano e metropolitano.',
+  },
+  {
+    id: 'combustiveis',
+    label: 'Revenda de combustíveis (monofásico)',
+    grupo: 'Regimes específicos',
+    classificacao: 'monofasicoRevenda',
+    descricao: 'CBS e IBS cobrados uma única vez, por unidade de medida (ad rem), na operação do produtor ou importador. As revendas seguintes saem com alíquota zero e sem crédito para o revendedor.',
+  },
+  {
+    id: 'personalizado',
+    label: 'Redução personalizada (informar o percentual)',
+    grupo: 'Personalizado',
+    classificacao: 'personalizado',
+    descricao: 'Informe o percentual de redução que se aplica ao seu caso — útil para enquadramentos específicos ou para testar um cenário.',
+  },
+];
+
+/** As categorias agrupadas, na ordem em que devem aparecer na tela. */
+export const GRUPOS_REDUCAO: GrupoReducao[] = [
+  'Alíquota cheia',
+  'Redução de 60%',
+  'Redução de 30%',
+  'Alíquota zero',
+  'Regimes específicos',
+  'Personalizado',
+];
+
+export function categoriaPorId(id: string): CategoriaLC214 {
+  return CATEGORIAS_LC214.find(c => c.id === id) ?? CATEGORIAS_LC214[0];
+}
 
 // ---------------------------------------------------------------------------
 // Cronograma da transição
@@ -336,10 +525,11 @@ export function apurarIVA(
   baseCredito: number,
   aliquotaCbs: number,
   aliquotaIbs: number,
-  classificacao: ClassificacaoReforma = 'padrao'
+  classificacao: ClassificacaoReforma = 'padrao',
+  reducaoPersonalizadaPercent = 0
 ): ApuracaoIVA {
   const regime = REGIMES_DIFERENCIADOS[classificacao];
-  const fator = regime.fator;
+  const fator = fatorDoRegime(classificacao, reducaoPersonalizadaPercent);
 
   const aliquotaCbsAplicada = aliquotaCbs * fator;
   const aliquotaIbsAplicada = aliquotaIbs * fator;
@@ -722,6 +912,8 @@ export interface ProjecaoPrecoInput {
   percCmvComCredito: number;
   /** Preço praticado hoje. */
   precoAtual: number;
+  /** Redução da alíquota, em %, quando a classificação é `personalizado`. */
+  reducaoPersonalizadaPercent?: number;
 }
 
 export interface ProjecaoPreco {
@@ -760,7 +952,7 @@ export interface ProjecaoPreco {
  */
 export function projetarPrecoReforma(input: ProjecaoPrecoInput): ProjecaoPreco {
   const regimeDif = REGIMES_DIFERENCIADOS[input.classificacao];
-  const aliquotaCbsAplicada = input.aliquotaCbs * regimeDif.fator;
+  const aliquotaCbsAplicada = input.aliquotaCbs * fatorDoRegime(input.classificacao, input.reducaoPersonalizadaPercent);
 
   const pisCofins = Math.min(Math.max(0, input.pisCofinsPercent), Math.max(0, input.impostoPercent));
   const impostoPorDentroRestante = Math.max(0, input.impostoPercent - pisCofins);

@@ -7,14 +7,14 @@ import {
   CRONOGRAMA,
   FAIXAS_SIMPLES,
   PRESETS_REGIME,
-  REGIMES_DIFERENCIADOS,
   aliquotasDoAno,
+  categoriaPorId,
   parcelaPisCofins,
   projetarPrecoReforma,
-  type ClassificacaoReforma,
   type ProjecaoPreco,
   type RegimeReforma,
 } from '../domain/reformaTributaria';
+import { SeletorReducaoLC214 } from './SeletorReducaoLC214';
 
 const STORAGE_KEY = 'vc_reforma_preco';
 
@@ -25,7 +25,10 @@ export interface ReformaPrecoConfig {
   regime: RegimeReforma;
   anexo: string;
   faixaIndex: number;
-  classificacao: ClassificacaoReforma;
+  /** Id da categoria da LC 214/2025 escolhida para o produto. */
+  categoriaId: string;
+  /** % de redução quando a categoria escolhida é a personalizada. */
+  reducaoPersonalizada: number;
   refCbs: number;
   refIbs: number;
   /** % do CMV que passa a gerar crédito de CBS que hoje não existe. */
@@ -38,7 +41,8 @@ export const CONFIG_REFORMA_PADRAO: ReformaPrecoConfig = {
   regime: 'presumido',
   anexo: 'Anexo I',
   faixaIndex: 0,
-  classificacao: 'padrao',
+  categoriaId: 'cheia',
+  reducaoPersonalizada: 0,
   refCbs: ALIQUOTA_REF_CBS,
   refIbs: ALIQUOTA_REF_IBS,
   percCmvComCredito: PRESETS_REGIME.presumido.creditoPadrao,
@@ -134,7 +138,8 @@ export function useMotorReforma(config: ReformaPrecoConfig): MotorReforma {
         despesasPercent: p.despesasPercent,
         margemPercent: p.margemPercent,
         aliquotaCbs: preset.precoMuda ? aliquotaPorFora : 0,
-        classificacao: config.classificacao,
+        classificacao: categoriaPorId(config.categoriaId).classificacao,
+        reducaoPersonalizadaPercent: config.reducaoPersonalizada,
         percCmvComCredito: preset.precoMuda ? config.percCmvComCredito : 0,
         precoAtual: p.precoAtual,
       });
@@ -244,18 +249,13 @@ export function PainelReformaPreco({
 
           {motor.precoMuda && (
             <>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Regime do produto na reforma</label>
-                <select
-                  value={config.classificacao}
-                  onChange={e => setConfig({ classificacao: e.target.value as ClassificacaoReforma })}
-                  className={inputCls}
-                >
-                  {(Object.keys(REGIMES_DIFERENCIADOS) as ClassificacaoReforma[]).map(c => (
-                    <option key={c} value={c}>{REGIMES_DIFERENCIADOS[c].label}</option>
-                  ))}
-                </select>
-              </div>
+              <SeletorReducaoLC214
+                categoriaId={config.categoriaId}
+                reducaoPersonalizada={config.reducaoPersonalizada}
+                onCategoriaChange={id => setConfig({ categoriaId: id })}
+                onReducaoChange={v => setConfig({ reducaoPersonalizada: v })}
+                aliquotaBase={motor.aliquotaPorFora}
+              />
 
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
