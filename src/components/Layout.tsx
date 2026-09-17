@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Calculator, Box, Tags, DollarSign, Wallet, FileText, Settings, LogOut, Crown, FileSpreadsheet, Percent, Users, TrendingUp, Layers, Menu, X, ChevronLeft, ChevronRight, Star } from 'lucide-react';
+import { LayoutDashboard, Calculator, Box, Tags, DollarSign, Wallet, FileText, Settings, LogOut, Crown, FileSpreadsheet, Percent, Users, TrendingUp, Layers, Menu, X, ChevronLeft, ChevronRight, Star, Scale } from 'lucide-react';
 import Logo from './Logo';
 import { useAppContext } from '../context/AppContext';
 
@@ -16,6 +16,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { name: 'Custos Fixos', path: '/custos-fixos', icon: Wallet },
     { name: 'Produtos', path: '/custos-variaveis', icon: DollarSign },
     { name: 'Impostos', path: '/impostos', icon: Percent },
+    { name: 'Reforma Tributária', path: '/reforma-tributaria', icon: Scale, highlight: 'bg-sky-500/10 text-sky-600 border-sky-500/20' },
     { name: 'Formação de Preço', path: '/formacao-preco', icon: Calculator, highlight: 'bg-red-500/10 text-red-600 border-red-500/20' },
     // { name: 'Mix de Preços', path: '/mix-preco', icon: Box, highlight: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' },
     { name: 'Preços em Lote', path: '/mix-preco-lote', icon: Layers, highlight: 'bg-purple-500/10 text-purple-600 border-purple-500/20' },
