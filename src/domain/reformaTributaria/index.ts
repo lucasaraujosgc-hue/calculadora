@@ -14,7 +14,7 @@
  * dentro": a alíquota incide sobre o preço que já contém o imposto.
  *
  * Todos os percentuais neste módulo são expressos em pontos percentuais
- * (ex.: 8.8 significa 8,8%).
+ * (ex.: 9.21 significa 9,21%).
  */
 
 // ---------------------------------------------------------------------------
@@ -22,15 +22,15 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Alíquotas de referência estimadas pelo Ministério da Fazenda para o IVA Dual
- * em regime pleno: 26,5% no total (CBS 8,8% + IBS 17,7%).
+ * Alíquotas de referência estimadas para o IVA Dual em regime pleno:
+ * CBS 9,21% + IBS 17,7%.
  *
  * ATENÇÃO: são ESTIMATIVAS. As alíquotas de referência definitivas serão
  * fixadas por Resolução do Senado Federal (EC 132/2023), com base no cálculo do
  * Tribunal de Contas da União, e cada Estado/Município pode fixar alíquota
  * própria de IBS acima ou abaixo da referência. Trate como parâmetro editável.
  */
-export const ALIQUOTA_REF_CBS = 8.8;
+export const ALIQUOTA_REF_CBS = 9.21;
 export const ALIQUOTA_REF_IBS = 17.7;
 
 // ---------------------------------------------------------------------------
@@ -283,8 +283,8 @@ export function porDentroParaPorFora(aliquotaPorDentro: number): number {
  *
  *   t_dentro = t_fora / (1 + t_fora)
  *
- * Ex.: os 26,5% por fora do IVA Dual representam 20,95% do preço pago pelo
- * consumidor — é esse o número comparável com a carga de hoje.
+ * Ex.: 26,91% por fora representam 21,20% do preço pago pelo consumidor — é
+ * esse o número comparável com a carga de hoje.
  */
 export function porForaParaPorDentro(aliquotaPorFora: number): number {
   return (aliquotaPorFora / (100 + aliquotaPorFora)) * 100;
@@ -559,4 +559,276 @@ export function precoPorFora(input: PrecoPorForaInput): ResultadoPreco {
     lucro: receitaLiquida * (input.margemPercent / 100),
     cargaSobrePrecoFinal: precoFinal > 0 ? (tributos / precoFinal) * 100 : 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Repartição dos tributos dentro do DAS do Simples Nacional
+// ---------------------------------------------------------------------------
+
+export type Reparticao = { cpp: number; issIcms: number; csll: number; irpj: number; cofins: number; pis: number };
+
+/**
+ * Percentual de cada tributo dentro do valor total do DAS, por anexo e faixa
+ * (Anexos da LC 123/2006). Fonte: planilha "Percentual de Repartição dos
+ * Tributos" da Receita Federal. `issIcms = 0` nas faixas em que o ICMS/ISS é
+ * recolhido à parte, fora do DAS.
+ *
+ * Na reforma, a parcela de PIS + COFINS é a que vira CBS, e a de ICMS/ISS vira
+ * IBS — por isso a tabela também serve para projetar preço.
+ */
+export const REPARTICAO_SIMPLES: Record<string, Reparticao[]> = {
+  'Anexo I': [
+    { cpp: 41.50, issIcms: 34.00, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
+    { cpp: 41.50, issIcms: 34.00, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
+    { cpp: 42.00, issIcms: 33.50, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
+    { cpp: 42.00, issIcms: 33.50, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
+    { cpp: 42.00, issIcms: 33.50, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
+    { cpp: 42.10, issIcms: 0.00, csll: 10.00, irpj: 13.50, cofins: 28.27, pis: 6.13 },
+  ],
+  'Anexo II': [
+    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
+    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
+    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
+    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
+    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
+    { cpp: 23.50, issIcms: 0.00, csll: 7.50, irpj: 8.50, cofins: 20.96, pis: 4.54 },
+  ],
+  'Anexo III': [
+    { cpp: 43.40, issIcms: 33.50, csll: 3.50, irpj: 4.00, cofins: 12.82, pis: 2.78 },
+    { cpp: 43.40, issIcms: 32.00, csll: 3.50, irpj: 4.00, cofins: 14.05, pis: 3.05 },
+    { cpp: 43.40, issIcms: 32.50, csll: 3.50, irpj: 4.00, cofins: 13.64, pis: 2.96 },
+    { cpp: 43.40, issIcms: 32.50, csll: 3.50, irpj: 4.00, cofins: 13.64, pis: 2.96 },
+    { cpp: 43.40, issIcms: 33.50, csll: 3.50, irpj: 4.00, cofins: 12.82, pis: 2.78 },
+    { cpp: 30.50, issIcms: 0.00, csll: 15.00, irpj: 35.00, cofins: 16.03, pis: 3.47 },
+  ],
+  'Anexo IV': [
+    { cpp: 0, issIcms: 44.50, csll: 15.20, irpj: 18.80, cofins: 17.67, pis: 3.83 },
+    { cpp: 0, issIcms: 40.00, csll: 15.20, irpj: 19.80, cofins: 20.55, pis: 4.45 },
+    { cpp: 0, issIcms: 40.00, csll: 15.20, irpj: 20.80, cofins: 19.73, pis: 4.27 },
+    { cpp: 0, issIcms: 40.00, csll: 19.20, irpj: 17.80, cofins: 18.90, pis: 4.10 },
+    { cpp: 0, issIcms: 40.00, csll: 19.20, irpj: 18.80, cofins: 18.08, pis: 3.92 },
+    { cpp: 0, issIcms: 0.00, csll: 21.50, irpj: 53.50, cofins: 20.55, pis: 4.45 },
+  ],
+  'Anexo V': [
+    { cpp: 28.85, issIcms: 14.00, csll: 15.00, irpj: 25.00, cofins: 14.10, pis: 3.05 },
+    { cpp: 27.85, issIcms: 17.00, csll: 15.00, irpj: 23.00, cofins: 14.10, pis: 3.05 },
+    { cpp: 23.85, issIcms: 19.00, csll: 15.00, irpj: 24.00, cofins: 14.92, pis: 3.23 },
+    { cpp: 23.85, issIcms: 21.00, csll: 15.00, irpj: 21.00, cofins: 15.74, pis: 3.41 },
+    { cpp: 23.85, issIcms: 23.50, csll: 12.50, irpj: 23.00, cofins: 14.10, pis: 3.05 },
+    { cpp: 29.50, issIcms: 0.00, csll: 15.50, irpj: 35.00, cofins: 16.44, pis: 3.56 },
+  ],
+};
+
+export const ANEXOS_SIMPLES = Object.keys(REPARTICAO_SIMPLES);
+
+export const FAIXAS_SIMPLES = [
+  'Faixa 1 — RBT12 até R$ 180 mil',
+  'Faixa 2 — até R$ 360 mil',
+  'Faixa 3 — até R$ 720 mil',
+  'Faixa 4 — até R$ 1,8 milhão',
+  'Faixa 5 — até R$ 3,6 milhões',
+  'Faixa 6 — até R$ 4,8 milhões',
+];
+
+// ---------------------------------------------------------------------------
+// Projeção de preço por regime tributário
+// ---------------------------------------------------------------------------
+
+export type RegimeReforma = 'mei' | 'simplesDentro' | 'simplesFora' | 'presumido' | 'real';
+
+export interface PresetRegime {
+  label: string;
+  /** O preço muda em 2027 neste regime? */
+  precoMuda: boolean;
+  /** Parcela fixa de PIS/COFINS sobre o faturamento (Presumido e Real). */
+  pisCofinsFixo: number | null;
+  /** Precisa de anexo/faixa do Simples para saber a parcela de PIS/COFINS? */
+  usaTabelaSimples: boolean;
+  /** Quanto do CMV passa a gerar crédito de CBS que hoje não existe, em %. */
+  creditoPadrao: number;
+  descricao: string;
+}
+
+/**
+ * Como cada regime chega em 2027, quando PIS e COFINS são extintos e a CBS
+ * entra por fora (ICMS e ISS seguem integrais até 2028).
+ */
+export const PRESETS_REGIME: Record<RegimeReforma, PresetRegime> = {
+  mei: {
+    label: 'MEI',
+    precoMuda: false,
+    pisCofinsFixo: 0,
+    usaTabelaSimples: false,
+    creditoPadrao: 0,
+    descricao:
+      'O DAS-MEI é um valor fixo e a reforma não o altera: o seu preço não muda em 2027. O ponto de atenção é comercial — quem compra do MEI toma crédito limitado de CBS.',
+  },
+  simplesDentro: {
+    label: 'Simples Nacional — CBS dentro do DAS',
+    precoMuda: false,
+    pisCofinsFixo: 0,
+    usaTabelaSimples: false,
+    creditoPadrao: 0,
+    descricao:
+      'Mantendo a CBS dentro do DAS, a alíquota efetiva não muda de valor (a parcela de PIS/COFINS só passa a se chamar CBS) e você não toma crédito das compras. O preço fica igual.',
+  },
+  simplesFora: {
+    label: 'Simples Nacional — CBS por fora do DAS',
+    precoMuda: true,
+    pisCofinsFixo: null,
+    usaTabelaSimples: true,
+    creditoPadrao: 100,
+    descricao:
+      'Optando por apurar a CBS pelo regime regular, a parcela de PIS/COFINS sai do DAS, você passa a creditar a CBS das compras e o seu cliente PJ credita a alíquota cheia.',
+  },
+  presumido: {
+    label: 'Lucro Presumido',
+    precoMuda: true,
+    pisCofinsFixo: 3.65,
+    usaTabelaSimples: false,
+    creditoPadrao: 100,
+    descricao:
+      'Hoje você paga 3,65% de PIS/COFINS cumulativo e não credita nada das compras. Em 2027 isso vira CBS por fora, com crédito amplo — costuma ser o regime que mais ganha.',
+  },
+  real: {
+    label: 'Lucro Real',
+    precoMuda: true,
+    pisCofinsFixo: 9.25,
+    usaTabelaSimples: false,
+    creditoPadrao: 0,
+    descricao:
+      'Hoje você paga 9,25% de PIS/COFINS não cumulativo e já credita insumos. A CBS troca um crédito restrito por um crédito amplo, então o ganho vem das compras que hoje não geram crédito.',
+  },
+};
+
+export interface ProjecaoPrecoInput {
+  /** Custo variável unitário (CMV) pago hoje. */
+  cmv: number;
+  /** Custo fixo unitário rateado. */
+  custoFixoUnitario: number;
+  /** % de impostos sobre o preço, por dentro, praticado hoje. */
+  impostoPercent: number;
+  /** % do preço que hoje é PIS/COFINS — some em 2027 e vira CBS. */
+  pisCofinsPercent: number;
+  /** Taxas de cartão, comissões e outras despesas variáveis, em % do preço. */
+  despesasPercent: number;
+  /** Margem líquida praticada, em % do preço. */
+  margemPercent: number;
+  /** Alíquota da CBS no ano simulado, antes do redutor. */
+  aliquotaCbs: number;
+  /** Regime diferenciado do produto (redutor de alíquota). */
+  classificacao: ClassificacaoReforma;
+  /** % do CMV que passa a gerar crédito de CBS que hoje não existe. */
+  percCmvComCredito: number;
+  /** Preço praticado hoje. */
+  precoAtual: number;
+}
+
+export interface ProjecaoPreco {
+  aliquotaCbsAplicada: number;
+  /** % de imposto que continua por dentro do preço (ICMS/ISS e demais). */
+  impostoPorDentroRestante: number;
+  /** Crédito de CBS por unidade vindo do CMV. */
+  creditoCbsUnitario: number;
+  /** Custo unitário depois do crédito. */
+  custoLiquidoUnitario: number;
+  /** Receita que fica com a empresa, sem a CBS. */
+  receitaLiquida: number;
+  /** CBS somada por fora. */
+  cbsPorFora: number;
+  /** Preço final para manter a mesma margem. */
+  precoMantendoMargem: number;
+  /** Variação percentual do preço em relação ao praticado hoje. */
+  variacaoPercent: number;
+  /** Margem realizada caso o preço de hoje seja mantido. */
+  margemMantendoPreco: number;
+  /** Lucro por unidade caso o preço de hoje seja mantido. */
+  lucroMantendoPreco: number;
+}
+
+/**
+ * Projeta o preço de um produto em 2027, quando PIS e COFINS somem e a CBS
+ * entra por fora.
+ *
+ * Hoje:  Preço = (CMV + CF) ÷ (1 − impostos% − despesas% − margem%)
+ * 2027:  Receita líquida = (CMV − crédito CBS + CF) ÷ (1 − impostos restantes% − despesas% − margem%)
+ *        Preço final     = Receita líquida × (1 + CBS%)
+ *
+ * O crédito é calculado "por dentro" do que se paga pela mercadoria
+ * (CMV × t ÷ (1 + t)): parte-se do princípio de que o valor desembolsado na
+ * compra não muda e que a CBS destacada nele volta como crédito.
+ */
+export function projetarPrecoReforma(input: ProjecaoPrecoInput): ProjecaoPreco {
+  const regimeDif = REGIMES_DIFERENCIADOS[input.classificacao];
+  const aliquotaCbsAplicada = input.aliquotaCbs * regimeDif.fator;
+
+  const pisCofins = Math.min(Math.max(0, input.pisCofinsPercent), Math.max(0, input.impostoPercent));
+  const impostoPorDentroRestante = Math.max(0, input.impostoPercent - pisCofins);
+
+  const percCredito = Math.min(100, Math.max(0, input.percCmvComCredito));
+  const creditoCbsUnitario = regimeDif.mantemCredito
+    ? input.cmv * (percCredito / 100) * (input.aliquotaCbs / (100 + input.aliquotaCbs))
+    : 0;
+
+  const custoLiquidoUnitario = input.cmv - creditoCbsUnitario;
+  const base = custoLiquidoUnitario + input.custoFixoUnitario;
+  const deducoes = (impostoPorDentroRestante + input.despesasPercent + input.margemPercent) / 100;
+
+  if (deducoes >= 1) {
+    return {
+      aliquotaCbsAplicada,
+      impostoPorDentroRestante,
+      creditoCbsUnitario,
+      custoLiquidoUnitario,
+      receitaLiquida: 0,
+      cbsPorFora: 0,
+      precoMantendoMargem: 0,
+      variacaoPercent: 0,
+      margemMantendoPreco: 0,
+      lucroMantendoPreco: 0,
+    };
+  }
+
+  const receitaLiquida = base / (1 - deducoes);
+  const cbsPorFora = receitaLiquida * (aliquotaCbsAplicada / 100);
+  const precoMantendoMargem = receitaLiquida + cbsPorFora;
+
+  // Mantendo o preço de hoje, o que sobra de margem depois da nova conta.
+  const receitaLiquidaNoPrecoAtual = input.precoAtual / (1 + aliquotaCbsAplicada / 100);
+  const lucroMantendoPreco =
+    receitaLiquidaNoPrecoAtual
+    - base
+    - receitaLiquidaNoPrecoAtual * ((impostoPorDentroRestante + input.despesasPercent) / 100);
+
+  return {
+    aliquotaCbsAplicada,
+    impostoPorDentroRestante,
+    creditoCbsUnitario,
+    custoLiquidoUnitario,
+    receitaLiquida,
+    cbsPorFora,
+    precoMantendoMargem,
+    variacaoPercent: input.precoAtual > 0 ? ((precoMantendoMargem - input.precoAtual) / input.precoAtual) * 100 : 0,
+    margemMantendoPreco: input.precoAtual > 0 ? (lucroMantendoPreco / input.precoAtual) * 100 : 0,
+    lucroMantendoPreco,
+  };
+}
+
+/**
+ * Quanto do percentual de imposto informado corresponde a PIS/COFINS hoje, em
+ * cada regime. No Simples usa-se a tabela de repartição do anexo/faixa; no
+ * Presumido e no Real, as alíquotas fixas do regime.
+ */
+export function parcelaPisCofins(
+  regime: RegimeReforma,
+  impostoPercent: number,
+  anexo: string,
+  faixaIndex: number
+): number {
+  const preset = PRESETS_REGIME[regime];
+  if (!preset.precoMuda) return 0;
+  if (preset.pisCofinsFixo !== null) return Math.min(preset.pisCofinsFixo, Math.max(0, impostoPercent));
+
+  const rep = REPARTICAO_SIMPLES[anexo]?.[faixaIndex] ?? REPARTICAO_SIMPLES['Anexo I'][0];
+  return Math.max(0, impostoPercent) * ((rep.pis + rep.cofins) / 100);
 }

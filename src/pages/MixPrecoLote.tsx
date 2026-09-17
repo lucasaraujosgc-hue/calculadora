@@ -24,6 +24,12 @@ import { useAppContext, ProdutoItem } from '../context/AppContext';
 import { calculateSellingPrice } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 import { exportToExcel } from '../utils/export';
+import {
+  PainelReformaPreco,
+  SeloPrecoReforma,
+  useMotorReforma,
+  useReformaPrecoConfig,
+} from '../components/ReformaPreco';
 import { FileText } from 'lucide-react';
 import CostCompositionChart from '../components/CostCompositionChart';
 
@@ -143,6 +149,10 @@ export default function MixPrecoLote() {
 
   const custoFixoTotal = custosFixos.reduce((acc, curr) => acc + curr.valor, 0);
 
+  // Projeção do preço na Reforma Tributária (compartilhada com a Formação de Preço)
+  const { config: reformaConfig, setConfig: setReformaConfig } = useReformaPrecoConfig();
+  const motorReforma = useMotorReforma(reformaConfig);
+
   const handleUpdateProduto = (id: string, updates: Partial<ProdutoItem>) => {
     const updated = produtos.map(p => (p.id === id ? { ...p, ...updates } : p));
     setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
@@ -155,6 +165,7 @@ export default function MixPrecoLote() {
   let receitaTotal = 0;
   let margemTotal = 0;
   let vendasTotais = 0;
+  let receitaTotalReforma = 0;
 
   const dataGraficoTotal: { name: string, value: number }[] = [
     { name: 'Custo Variável (CMV)', value: 0 },
@@ -201,9 +212,19 @@ export default function MixPrecoLote() {
     const isValidMargem = margemContribuicao > 0;
     const peUnidades = isValidMargem ? (valorRateadoCF / margemContribuicao) : Infinity;
 
+    const projecaoReforma = motorReforma.projetar({
+      cmv: p.cmv,
+      custoFixoUnitario,
+      impostoPercent: imposto,
+      despesasPercent: taxaCartao + comissao,
+      margemPercent: margemReal,
+      precoAtual: preco,
+    });
+
     receitaTotal += preco * vendas;
     margemTotal += margemContribuicao * vendas;
     vendasTotais += vendas;
+    receitaTotalReforma += (motorReforma.precoMuda ? projecaoReforma.precoMantendoMargem : preco) * vendas;
 
     dataGraficoTotal[0].value += p.cmv * vendas;
     dataGraficoTotal[1].value += custoFixoUnitario * vendas;
@@ -233,10 +254,12 @@ export default function MixPrecoLote() {
       peUnidades,
       isValidMargem,
       semRateio: rateio === 0,
+      projecaoReforma,
     };
   });
 
   const lucroMix = margemTotal - custoFixoTotal;
+  const variacaoReceitaReforma = receitaTotal > 0 ? ((receitaTotalReforma - receitaTotal) / receitaTotal) * 100 : 0;
 
   const qtdSemRateio = processedProdutos.filter(p => p.semRateio).length;
   const qtdPrejuizo = processedProdutos.filter(p => !p.isValidMargem).length;
@@ -627,6 +650,34 @@ export default function MixPrecoLote() {
 
 
 
+      <PainelReformaPreco config={reformaConfig} setConfig={setReformaConfig} motor={motorReforma} />
+
+      {reformaConfig.ativo && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
+            <p className="text-xs text-muted-foreground mb-1">Receita do mix hoje</p>
+            <p className="text-2xl font-bold text-foreground">{formatCurrency(receitaTotal)}</p>
+            <p className="text-xs text-muted-foreground mt-1">com os preços aplicados hoje</p>
+          </div>
+          <div className="bg-card border border-sky-300 p-4 rounded-xl shadow-sm">
+            <p className="text-xs text-sky-800 mb-1">Receita do mix em {reformaConfig.ano}</p>
+            <p className="text-2xl font-bold text-sky-700">{formatCurrency(receitaTotalReforma)}</p>
+            <p className="text-xs text-muted-foreground mt-1">mantendo a margem de cada produto</p>
+          </div>
+          <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
+            <p className="text-xs text-muted-foreground mb-1">Variação no preço ao cliente</p>
+            <p className={`text-2xl font-bold ${variacaoReceitaReforma > 0.005 ? 'text-red-600' : variacaoReceitaReforma < -0.005 ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+              {variacaoReceitaReforma >= 0 ? '+' : ''}{variacaoReceitaReforma.toFixed(2)}%
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {motorReforma.precoMuda
+                ? `${motorReforma.aliquotaPorFora.toFixed(2)}% por fora + crédito de CBS no CMV`
+                : 'Neste regime o preço não muda com a reforma'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Barra de busca, filtro e ordenação */}
       <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
         <div className="relative flex-1 max-w-md">
@@ -702,6 +753,11 @@ export default function MixPrecoLote() {
                     <Tag className="w-3 h-3" /> PREÇO APLICADO
                   </span>
                 </th>
+                {reformaConfig.ativo && (
+                  <th className="px-2 py-3 text-center bg-sky-50/80 text-sky-700 font-semibold text-xs border-x border-sky-200/50">
+                    Preço {reformaConfig.ano}
+                  </th>
+                )}
                 <th className="px-2 py-3 text-center text-xs">Ações</th>
               </tr>
             </thead>
@@ -791,6 +847,16 @@ export default function MixPrecoLote() {
                           </span>
                         </div>
                       </td>
+                      {reformaConfig.ativo && (
+                        <td className="px-2 py-2 text-center bg-sky-50/40 border-x border-sky-200/30" onClick={(e) => e.stopPropagation()}>
+                          <SeloPrecoReforma
+                            projecao={p.projecaoReforma}
+                            precoMuda={motorReforma.precoMuda}
+                            formatar={formatCurrency}
+                            compacto
+                          />
+                        </td>
+                      )}
                       <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1.5">
                           <button
@@ -808,7 +874,7 @@ export default function MixPrecoLote() {
                     {/* Painel expandido: mesmos elementos e campos editáveis do Mix de Preços */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={6} className="p-0 bg-muted/20">
+                        <td colSpan={reformaConfig.ativo ? 7 : 6} className="p-0 bg-muted/20">
                           <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
                             {/* Inputs */}
                             <div className="col-span-1 lg:col-span-4 space-y-4">
@@ -879,6 +945,31 @@ export default function MixPrecoLote() {
                                 <p className="text-sm font-medium text-muted-foreground mb-1">Margem de Contribuição</p>
                                 <h3 className={`text-2xl font-semibold ${p.margemContribuicao >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(p.margemContribuicao)}</h3>
                               </div>
+
+                              {reformaConfig.ativo && (
+                                <div className="bg-background border border-sky-300 p-4 rounded-xl shadow-sm">
+                                  <p className="text-sm font-medium text-sky-800 mb-1">Preço em {reformaConfig.ano} — {motorReforma.preset.label}</p>
+                                  {motorReforma.precoMuda ? (
+                                    <>
+                                      <h3 className="text-2xl font-semibold text-sky-700">{formatCurrency(p.projecaoReforma.precoMantendoMargem)}</h3>
+                                      <p className={`text-xs font-medium mt-0.5 ${p.projecaoReforma.variacaoPercent > 0.005 ? 'text-red-600' : p.projecaoReforma.variacaoPercent < -0.005 ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+                                        {p.projecaoReforma.variacaoPercent >= 0 ? '+' : ''}{p.projecaoReforma.variacaoPercent.toFixed(2)}% vs o preço de hoje, mantendo a mesma margem
+                                      </p>
+                                      <div className="mt-3 pt-3 border-t border-border space-y-1">
+                                        <div className="flex justify-between text-xs"><span className="text-muted-foreground">(–) Crédito de CBS no CMV</span><span className="font-medium text-emerald-700">{formatCurrency(p.projecaoReforma.creditoCbsUnitario)}</span></div>
+                                        <div className="flex justify-between text-xs"><span className="text-muted-foreground">Imposto ainda por dentro</span><span className="font-medium">{p.projecaoReforma.impostoPorDentroRestante.toFixed(2)}%</span></div>
+                                        <div className="flex justify-between text-xs"><span className="text-muted-foreground">Receita líquida</span><span className="font-medium">{formatCurrency(p.projecaoReforma.receitaLiquida)}</span></div>
+                                        <div className="flex justify-between text-xs"><span className="text-muted-foreground">(+) CBS por fora ({p.projecaoReforma.aliquotaCbsAplicada.toFixed(2)}%)</span><span className="font-medium">{formatCurrency(p.projecaoReforma.cbsPorFora)}</span></div>
+                                        <div className="flex justify-between text-xs pt-1 border-t border-border"><span className="text-muted-foreground">Margem se mantiver o preço de hoje</span><span className="font-medium">{p.projecaoReforma.margemMantendoPreco.toFixed(1)}%</span></div>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      Neste regime a guia não muda de valor, então o preço de {formatCurrency(p.preco)} continua valendo.
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                               <div className="bg-background border border-border p-4 rounded-xl shadow-sm">
                                 <div className="flex justify-between items-start">
                                   <div>
@@ -917,7 +1008,7 @@ export default function MixPrecoLote() {
 
               {validProdutos.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={reformaConfig.ativo ? 7 : 6} className="px-4 py-8 text-center text-muted-foreground">
                     Nenhum produto cadastrado. Adicione produtos na aba Custos Variáveis.
                   </td>
                 </tr>
@@ -925,7 +1016,7 @@ export default function MixPrecoLote() {
 
               {validProdutos.length > 0 && sortedProdutos.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={reformaConfig.ativo ? 7 : 6} className="px-4 py-8 text-center text-muted-foreground">
                     Nenhum produto encontrado para "{searchTerm}"{filterMode !== 'todos' ? ' com o filtro aplicado' : ''}.
                   </td>
                 </tr>

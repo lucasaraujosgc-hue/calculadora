@@ -91,7 +91,7 @@ export default function ReformaTributaria() {
   const [margemPercent, setMargemPercent] = useState(20);
 
   // Conversor de alíquotas
-  const [aliquotaConversor, setAliquotaConversor] = useState(26.5);
+  const [aliquotaConversor, setAliquotaConversor] = useState(Number((ALIQUOTA_REF_CBS + ALIQUOTA_REF_IBS).toFixed(2)));
 
   const fase = useMemo(() => aliquotasDoAno(anoSelecionado, refCbs, refIbs), [anoSelecionado, refCbs, refIbs]);
   const regimeDif = REGIMES_DIFERENCIADOS[classificacao];
@@ -383,18 +383,18 @@ export default function ReformaTributaria() {
               sufixo="%"
               value={refCbs}
               onChange={setRefCbs}
-              ajuda="Estimativa oficial: 8,8%."
+              ajuda={`Estimativa de referência: ${ALIQUOTA_REF_CBS.toFixed(2).replace('.', ',')}%.`}
             />
             <Campo
               label="Alíquota de referência do IBS"
               sufixo="%"
               value={refIbs}
               onChange={setRefIbs}
-              ajuda="Estimativa oficial: 17,7%."
+              ajuda={`Estimativa de referência: ${ALIQUOTA_REF_IBS.toFixed(2).replace('.', ',')}%.`}
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            Juntas, as estimativas somam 26,5% por fora — equivalentes a {porForaParaPorDentro(refCbs + refIbs).toFixed(2)}% do preço final.
+            Juntas, as estimativas somam {(refCbs + refIbs).toFixed(2)}% por fora — equivalentes a {porForaParaPorDentro(refCbs + refIbs).toFixed(2)}% do preço final.
             As alíquotas definitivas serão fixadas por Resolução do Senado Federal.
           </p>
         </div>
@@ -635,7 +635,7 @@ export default function ReformaTributaria() {
         <Info className="w-4 h-4 shrink-0 mt-0.5" />
         <span>
           Base normativa: Emenda Constitucional nº 132/2023 e Lei Complementar nº 214/2025. As alíquotas de referência de CBS e IBS são
-          estimativas do Ministério da Fazenda (8,8% + 17,7% = 26,5%) e ainda serão fixadas por Resolução do Senado Federal; Estados e
+          estimativas de referência (CBS {ALIQUOTA_REF_CBS.toFixed(2)}% + IBS {ALIQUOTA_REF_IBS.toFixed(2)}%) e ainda serão fixadas por Resolução do Senado Federal; Estados e
           Municípios podem fixar alíquotas próprias de IBS. Esta página é uma ferramenta de simulação e planejamento — não substitui a
           orientação do seu contador.
         </span>

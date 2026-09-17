@@ -7,6 +7,7 @@ import {
   ALIQUOTA_REF_IBS,
   CRONOGRAMA,
   REGIMES_DIFERENCIADOS,
+  REPARTICAO_SIMPLES,
   aliquotasDoAno,
   apurarIVA,
   baseDoPrecoPorFora,
@@ -78,57 +79,6 @@ const LIMITE_FAIXA_1 = 180000;
 // Alíquotas especiais para faixa 1 (até 15 mil/mês)
 const ALIQUOTA_ESPECIAL_ANEXO_I = 2.64;
 const ALIQUOTA_ESPECIAL_ANEXO_II = 3.06;
-
-// ---------------------------------------------------------------------------
-// Percentual de Repartição dos Tributos do Simples Nacional (Anexo I da LC 123)
-// Percentuais de CADA tributo dentro do valor total do DAS, por anexo/faixa.
-// Fonte: planilha "Percentual de Repartição dos Tributos" (Receita Federal).
-// issIcms = 0 nas faixas em que o ICMS/ISS é recolhido à parte, fora do DAS.
-// ---------------------------------------------------------------------------
-type Reparticao = { cpp: number; issIcms: number; csll: number; irpj: number; cofins: number; pis: number };
-
-const REPARTICAO_SIMPLES: Record<string, Reparticao[]> = {
-  'Anexo I': [
-    { cpp: 41.50, issIcms: 34.00, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
-    { cpp: 41.50, issIcms: 34.00, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
-    { cpp: 42.00, issIcms: 33.50, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
-    { cpp: 42.00, issIcms: 33.50, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
-    { cpp: 42.00, issIcms: 33.50, csll: 3.50, irpj: 5.50, cofins: 12.74, pis: 2.76 },
-    { cpp: 42.10, issIcms: 0.00, csll: 10.00, irpj: 13.50, cofins: 28.27, pis: 6.13 },
-  ],
-  'Anexo II': [
-    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
-    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
-    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
-    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
-    { cpp: 37.50, issIcms: 32.00, csll: 3.50, irpj: 5.50, cofins: 11.51, pis: 2.49 },
-    { cpp: 23.50, issIcms: 0.00, csll: 7.50, irpj: 8.50, cofins: 20.96, pis: 4.54 },
-  ],
-  'Anexo III': [
-    { cpp: 43.40, issIcms: 33.50, csll: 3.50, irpj: 4.00, cofins: 12.82, pis: 2.78 },
-    { cpp: 43.40, issIcms: 32.00, csll: 3.50, irpj: 4.00, cofins: 14.05, pis: 3.05 },
-    { cpp: 43.40, issIcms: 32.50, csll: 3.50, irpj: 4.00, cofins: 13.64, pis: 2.96 },
-    { cpp: 43.40, issIcms: 32.50, csll: 3.50, irpj: 4.00, cofins: 13.64, pis: 2.96 },
-    { cpp: 43.40, issIcms: 33.50, csll: 3.50, irpj: 4.00, cofins: 12.82, pis: 2.78 },
-    { cpp: 30.50, issIcms: 0.00, csll: 15.00, irpj: 35.00, cofins: 16.03, pis: 3.47 },
-  ],
-  'Anexo IV': [
-    { cpp: 0, issIcms: 44.50, csll: 15.20, irpj: 18.80, cofins: 17.67, pis: 3.83 },
-    { cpp: 0, issIcms: 40.00, csll: 15.20, irpj: 19.80, cofins: 20.55, pis: 4.45 },
-    { cpp: 0, issIcms: 40.00, csll: 15.20, irpj: 20.80, cofins: 19.73, pis: 4.27 },
-    { cpp: 0, issIcms: 40.00, csll: 19.20, irpj: 17.80, cofins: 18.90, pis: 4.10 },
-    { cpp: 0, issIcms: 40.00, csll: 19.20, irpj: 18.80, cofins: 18.08, pis: 3.92 },
-    { cpp: 0, issIcms: 0.00, csll: 21.50, irpj: 53.50, cofins: 20.55, pis: 4.45 },
-  ],
-  'Anexo V': [
-    { cpp: 28.85, issIcms: 14.00, csll: 15.00, irpj: 25.00, cofins: 14.10, pis: 3.05 },
-    { cpp: 27.85, issIcms: 17.00, csll: 15.00, irpj: 23.00, cofins: 14.10, pis: 3.05 },
-    { cpp: 23.85, issIcms: 19.00, csll: 15.00, irpj: 24.00, cofins: 14.92, pis: 3.23 },
-    { cpp: 23.85, issIcms: 21.00, csll: 15.00, irpj: 21.00, cofins: 15.74, pis: 3.41 },
-    { cpp: 23.85, issIcms: 23.50, csll: 12.50, irpj: 23.00, cofins: 14.10, pis: 3.05 },
-    { cpp: 29.50, issIcms: 0.00, csll: 15.50, irpj: 35.00, cofins: 16.44, pis: 3.56 },
-  ],
-};
 
 function calcularAnexo(rbt12: number, anexoSelecionado: string, folhaMensal: number) {
   const folha12 = folhaMensal * 12;
@@ -1143,7 +1093,7 @@ export default function SimuladorImpostos() {
                 <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800">
                   <Info className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>
-                    As alíquotas de referência (8,8% de CBS e 17,7% de IBS) são estimativas do Ministério da Fazenda e ainda serão fixadas por
+                    As alíquotas de referência ({ALIQUOTA_REF_CBS.toFixed(2)}% de CBS e {ALIQUOTA_REF_IBS.toFixed(2)}% de IBS) são estimativas e ainda serão fixadas por
                     Resolução do Senado Federal. Entenda a nova sistemática na aba <strong>Reforma Tributária</strong>.
                   </span>
                 </div>
