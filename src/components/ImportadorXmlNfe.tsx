@@ -75,10 +75,16 @@ interface DocumentoListado {
 }
 
 interface ResultadoImport {
+  /** Amostra das notas importadas — o número real está em totalImportadas. */
   importadas: NotaImportada[];
   ignoradas: { arquivo: string; motivo: string }[];
+  totalImportadas: number;
+  totalIgnoradas: number;
   totalCompras: number;
   totalVendas: number;
+  /** Quantos .zip foram abertos e quantos XMLs saíram deles somados aos avulsos. */
+  zipsAbertos: number;
+  xmlsLidos: number;
 }
 
 /** AAAA-MM → "mai/2026". */
@@ -112,6 +118,8 @@ export default function ImportadorXmlNfe() {
 
   const [aberto, setAberto] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [quantidadeEnviando, setQuantidadeEnviando] = useState(0);
+  const [arrastando, setArrastando] = useState(false);
   const [resultado, setResultado] = useState<ResultadoImport | null>(null);
   const [erro, setErro] = useState('');
 
@@ -181,22 +189,26 @@ export default function ImportadorXmlNfe() {
     }
   };
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const arquivos = e.target.files;
-    if (!arquivos || arquivos.length === 0) return;
+  const enviarArquivos = async (lista: File[]) => {
+    if (lista.length === 0) return;
 
     setEnviando(true);
+    setQuantidadeEnviando(lista.length);
     setErro('');
     setResultado(null);
 
     const form = new FormData();
-    for (const arquivo of Array.from(arquivos)) form.append('files', arquivo);
+    for (const arquivo of lista) form.append('files', arquivo);
 
     try {
       const res = await fetch('/api/fiscal/import', { method: 'POST', body: form });
+      if (res.status === 413) {
+        setErro('Os arquivos somados passaram do tamanho aceito. Envie menos arquivos por vez, ou divida o .zip.');
+        return;
+      }
       const data = await res.json();
       if (!res.ok) {
-        setErro(data.error || 'Erro ao importar os XMLs.');
+        setErro(data.error || 'Erro ao importar os arquivos.');
       } else {
         setResultado(data);
         await carregarResumo();
@@ -206,8 +218,28 @@ export default function ImportadorXmlNfe() {
       setErro('Erro de conexão ao enviar os arquivos.');
     } finally {
       setEnviando(false);
-      if (e.target) e.target.value = '';
+      setQuantidadeEnviando(0);
     }
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const arquivos = Array.from(e.target.files ?? []);
+    await enviarArquivos(arquivos);
+    if (e.target) e.target.value = '';
+  };
+
+  /** Arrastar e soltar: é o jeito mais rápido de mandar a pasta inteira de notas. */
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setArrastando(false);
+    if (enviando || !temDocumento) return;
+    const arquivos = Array.from(e.dataTransfer?.files ?? []);
+    const aceitos = arquivos.filter(f => /\.(xml|zip)$/i.test(f.name));
+    if (aceitos.length === 0) {
+      setErro('Solte arquivos .xml ou um .zip com os XMLs dentro.');
+      return;
+    }
+    await enviarArquivos(aceitos);
   };
 
   const sugestoes = useMemo(() => {
@@ -428,10 +460,10 @@ export default function ImportadorXmlNfe() {
         <div className="flex items-start gap-3">
           <FileCode2 className="w-5 h-5 text-primary shrink-0 mt-0.5" />
           <div>
-            <h3 className="font-medium text-foreground">Importar notas fiscais (XML)</h3>
+            <h3 className="font-medium text-foreground">Importar notas fiscais (XML ou ZIP)</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              Crie uma conta para importar os XMLs das suas notas de compra e venda e deixar o sistema preencher custo,
-              preço e volume de cada produto sozinho.
+              Crie uma conta para importar os XMLs das suas notas de compra e venda — soltos ou dentro de um .zip — e
+              deixar o sistema preencher custo, preço e volume de cada produto sozinho.
             </p>
             <Link to="/auth" className="inline-block mt-3 bg-primary text-primary-foreground px-3 py-1.5 rounded text-xs font-bold hover:bg-primary/90 transition-colors">
               Fazer Cadastro / Login
@@ -452,10 +484,10 @@ export default function ImportadorXmlNfe() {
         <span className="flex items-start gap-3">
           <FileCode2 className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
           <span>
-            <span className="block font-medium text-foreground">Importar notas fiscais (XML)</span>
+            <span className="block font-medium text-foreground">Importar notas fiscais (XML ou ZIP)</span>
             <span className="block text-sm text-muted-foreground mt-0.5">
-              Envie os XMLs de compra e de venda juntos. O sistema separa pelo seu CNPJ/CPF e apura custo e preço médio
-              mês a mês.
+              Envie os XMLs de compra e de venda juntos, ou o .zip que a contabilidade manda. O sistema separa pelo seu
+              CNPJ/CPF e apura custo e preço médio mês a mês.
             </span>
           </span>
         </span>
@@ -480,16 +512,45 @@ export default function ImportadorXmlNfe() {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <p className="text-sm text-muted-foreground flex-1">
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
                 Classificando as notas pelo documento <strong className="text-foreground">{formatarDocumento(user.taxId!)}</strong>.
               </p>
-              <label className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors ${enviando ? 'bg-muted text-muted-foreground cursor-wait' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}>
-                <ArrowDownToLine className="w-4 h-4" />
-                {enviando ? 'Lendo os XMLs...' : 'Selecionar XMLs'}
+
+              <label
+                onDragOver={e => { e.preventDefault(); if (!enviando) setArrastando(true); }}
+                onDragLeave={() => setArrastando(false)}
+                onDrop={handleDrop}
+                className={`flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-lg border-2 border-dashed text-center transition-colors ${
+                  enviando
+                    ? 'border-border bg-muted/40 cursor-wait'
+                    : arrastando
+                      ? 'border-primary bg-primary/10 cursor-copy'
+                      : 'border-border bg-muted/20 hover:border-primary/50 hover:bg-muted/40 cursor-pointer'
+                }`}
+              >
+                <ArrowDownToLine className={`w-6 h-6 ${arrastando ? 'text-primary' : 'text-muted-foreground'}`} />
+                {enviando ? (
+                  <>
+                    <span className="text-sm font-medium text-foreground">
+                      Lendo {quantidadeEnviando} arquivo{quantidadeEnviando === 1 ? '' : 's'}...
+                    </span>
+                    <span className="text-xs text-muted-foreground">Pode demorar um pouco se o pacote for grande.</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-medium text-foreground">
+                      Arraste os arquivos aqui ou clique para escolher
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Aceita <strong>.xml</strong> e <strong>.zip</strong>. Pode selecionar vários de uma vez — no seletor,
+                      use Ctrl+A para pegar a pasta inteira, ou Ctrl/Shift + clique para escolher alguns.
+                    </span>
+                  </>
+                )}
                 <input
                   type="file"
-                  accept=".xml,text/xml,application/xml"
+                  accept=".xml,.zip,text/xml,application/xml,application/zip,application/x-zip-compressed"
                   multiple
                   onChange={handleUpload}
                   disabled={enviando}
@@ -509,14 +570,21 @@ export default function ImportadorXmlNfe() {
               <div className="flex items-start gap-2 text-sm">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                 <span className="text-foreground">
-                  <strong>{resultado.importadas.length}</strong> nota(s) importada(s) —{' '}
+                  <strong>{resultado.totalImportadas}</strong> nota(s) importada(s) —{' '}
                   {resultado.totalCompras} de compra e {resultado.totalVendas} de venda.
+                  {resultado.zipsAbertos > 0 && (
+                    <span className="text-muted-foreground">
+                      {' '}({resultado.zipsAbertos} .zip aberto{resultado.zipsAbertos === 1 ? '' : 's'},{' '}
+                      {resultado.xmlsLidos} XML{resultado.xmlsLidos === 1 ? '' : 's'} lido{resultado.xmlsLidos === 1 ? '' : 's'})
+                    </span>
+                  )}
                 </span>
               </div>
-              {resultado.ignoradas.length > 0 && (
+              {resultado.totalIgnoradas > 0 && (
                 <div className="text-sm">
                   <p className="text-amber-800 font-medium mb-1">
-                    {resultado.ignoradas.length} arquivo(s) não entraram:
+                    {resultado.totalIgnoradas} arquivo(s) não entraram
+                    {resultado.totalIgnoradas > resultado.ignoradas.length && ` (mostrando os ${resultado.ignoradas.length} primeiros)`}:
                   </p>
                   <ul className="space-y-1 max-h-40 overflow-y-auto">
                     {resultado.ignoradas.map((i, idx) => (
@@ -538,7 +606,7 @@ export default function ImportadorXmlNfe() {
               <Info className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
                 Nenhuma nota importada ainda. Baixe os XMLs no portal da sua contabilidade ou no site da SEFAZ e envie
-                aqui — pode mandar compras e vendas de vários meses de uma vez.
+                aqui — pode mandar o .zip inteiro, ou compras e vendas de vários meses de uma vez.
               </span>
             </div>
           )}

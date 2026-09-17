@@ -20,6 +20,7 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import { ErroNotaFiscal, direcaoDaNota, lerNotaFiscal, normalizarDescricao, somenteDigitos } from "./src/domain/fiscal/nfe.js";
 import { sugerirVinculos } from "./src/domain/fiscal/sugestoes.js";
+import AdmZip from "adm-zip";
 import { aplicarVinculos, resumirPorProdutoPeriodo, type ItemComContexto } from "./src/domain/fiscal/agregacao.js";
 
 dotenv.config();
@@ -969,10 +970,101 @@ app.post("/api/admin/users/:userId/products/import", requireAdmin, upload.single
 // emissão, porque o mesmo produto muda de preço de um mês para o outro.
 // ---------------------------------------------------------------------------
 
+// Um .zip com as notas de um mês inteiro passa fácil dos 5 MB de um XML avulso.
+const TAMANHO_MAXIMO_ARQUIVO = 60 * 1024 * 1024;
+const MAXIMO_ARQUIVOS = 300;
+/** Tetos de descompactação, para um zip malicioso não estourar a memória. */
+const MAXIMO_ENTRADAS_POR_ZIP = 3000;
+const MAXIMO_BYTES_DESCOMPACTADOS = 300 * 1024 * 1024;
+
 const uploadXml = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 300 },
+  limits: { fileSize: TAMANHO_MAXIMO_ARQUIVO, files: MAXIMO_ARQUIVOS },
 });
+
+/** Um XML a processar, já com o nome que o usuário vai ver em caso de erro. */
+interface ArquivoParaLer {
+  nome: string;
+  conteudo: string;
+}
+
+function ehZip(nome: string, buffer: Buffer): boolean {
+  if (/\.zip$/i.test(nome)) return true;
+  // Assinatura "PK\x03\x04": vale quando o navegador manda o mimetype errado.
+  return buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04;
+}
+
+/**
+ * Abre um .zip e devolve os XMLs de dentro, inclusive os que estão em subpastas.
+ *
+ * Nada é gravado em disco — as entradas são lidas para a memória —, então não há
+ * risco de path traversal. O que é preciso limitar é o tamanho descompactado,
+ * para um arquivo pequeno de propósito não virar gigabytes na memória.
+ */
+function extrairXmlsDoZip(nomeZip: string, buffer: Buffer): {
+  arquivos: ArquivoParaLer[];
+  ignoradas: { arquivo: string; motivo: string }[];
+} {
+  const arquivos: ArquivoParaLer[] = [];
+  const ignoradas: { arquivo: string; motivo: string }[] = [];
+
+  let entradas: any[];
+  try {
+    entradas = new AdmZip(buffer).getEntries();
+  } catch {
+    return { arquivos, ignoradas: [{ arquivo: nomeZip, motivo: "Não foi possível abrir o .zip. Ele pode estar corrompido ou protegido por senha." }] };
+  }
+
+  let bytes = 0;
+  let lidas = 0;
+  let outrosFormatos = 0;
+
+  for (const entrada of entradas) {
+    if (entrada.isDirectory) continue;
+    const caminho = String(entrada.entryName || "");
+    // Lixo que o macOS coloca dentro dos zips.
+    if (caminho.startsWith("__MACOSX/") || caminho.split("/").pop()?.startsWith("._")) continue;
+
+    if (!/\.xml$/i.test(caminho)) {
+      if (/\.zip$/i.test(caminho)) {
+        ignoradas.push({ arquivo: `${nomeZip} › ${caminho}`, motivo: "Zip dentro de zip não é aberto. Descompacte antes de enviar." });
+      } else {
+        outrosFormatos += 1;
+      }
+      continue;
+    }
+
+    if (lidas >= MAXIMO_ENTRADAS_POR_ZIP) {
+      ignoradas.push({ arquivo: nomeZip, motivo: `O .zip tem mais de ${MAXIMO_ENTRADAS_POR_ZIP} XMLs. Divida em partes menores.` });
+      break;
+    }
+
+    const tamanho = Number(entrada.header?.size ?? 0);
+    if (bytes + tamanho > MAXIMO_BYTES_DESCOMPACTADOS) {
+      ignoradas.push({ arquivo: nomeZip, motivo: "O conteúdo do .zip é grande demais para ser lido de uma vez. Divida em partes menores." });
+      break;
+    }
+
+    try {
+      arquivos.push({ nome: `${nomeZip} › ${caminho}`, conteudo: entrada.getData().toString("utf8") });
+      bytes += tamanho;
+      lidas += 1;
+    } catch {
+      ignoradas.push({ arquivo: `${nomeZip} › ${caminho}`, motivo: "Não foi possível ler este arquivo de dentro do .zip." });
+    }
+  }
+
+  if (arquivos.length === 0 && ignoradas.length === 0) {
+    ignoradas.push({
+      arquivo: nomeZip,
+      motivo: outrosFormatos > 0
+        ? `O .zip não tem nenhum XML — só ${outrosFormatos} arquivo(s) de outros formatos.`
+        : "O .zip está vazio.",
+    });
+  }
+
+  return { arquivos, ignoradas };
+}
 
 app.post("/api/fiscal/import", requireUser, uploadXml.array("files", 300), async (req: any, res) => {
   const documentoEmpresa = somenteDigitos(req.currentUser.taxId);
@@ -983,11 +1075,45 @@ app.post("/api/fiscal/import", requireUser, uploadXml.array("files", 300), async
     });
   }
 
-  const arquivos: any[] = req.files || [];
-  if (arquivos.length === 0) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+  const enviados: any[] = req.files || [];
+  if (enviados.length === 0) return res.status(400).json({ error: "Nenhum arquivo enviado." });
 
   const importadas: any[] = [];
   const ignoradas: { arquivo: string; motivo: string }[] = [];
+
+  // Os .zip são abertos aqui: daqui para baixo tudo é XML, venha ele solto ou de
+  // dentro de um pacote.
+  const arquivos: ArquivoParaLer[] = [];
+  let zipsAbertos = 0;
+  for (const enviado of enviados) {
+    const nome = enviado.originalname || "arquivo";
+    if (ehZip(nome, enviado.buffer)) {
+      const extraido = extrairXmlsDoZip(nome, enviado.buffer);
+      arquivos.push(...extraido.arquivos);
+      ignoradas.push(...extraido.ignoradas);
+      if (extraido.arquivos.length > 0) zipsAbertos += 1;
+      continue;
+    }
+    if (!/\.xml$/i.test(nome)) {
+      ignoradas.push({ arquivo: nome, motivo: "Formato não aceito. Envie o XML da nota ou um .zip com os XMLs dentro." });
+      continue;
+    }
+    arquivos.push({ nome, conteudo: enviado.buffer.toString("utf8") });
+  }
+
+  if (arquivos.length === 0) {
+    return res.json({
+      success: true,
+      importadas: [],
+      ignoradas,
+      totalImportadas: 0,
+      totalIgnoradas: ignoradas.length,
+      totalCompras: 0,
+      totalVendas: 0,
+      zipsAbertos,
+      xmlsLidos: 0,
+    });
+  }
 
   // As chaves já gravadas evitam recontar a mesma nota em uma reimportação.
   const jaImportadas = new Set(
@@ -998,9 +1124,9 @@ app.post("/api/fiscal/import", requireUser, uploadXml.array("files", 300), async
   );
 
   for (const arquivo of arquivos) {
-    const nomeArquivo = arquivo.originalname || "arquivo.xml";
+    const nomeArquivo = arquivo.nome;
     try {
-      const nota = lerNotaFiscal(arquivo.buffer.toString("utf8"));
+      const nota = lerNotaFiscal(arquivo.conteudo);
       if (jaImportadas.has(nota.chave)) {
         ignoradas.push({ arquivo: nomeArquivo, motivo: "Nota já importada antes." });
         continue;
@@ -1081,12 +1207,19 @@ app.post("/api/fiscal/import", requireUser, uploadXml.array("files", 300), async
     }
   }
 
+  // Um zip com centenas de notas geraria uma resposta enorme; a tela só precisa
+  // dos totais e de uma amostra do que não entrou.
+  const LIMITE_DETALHE = 200;
   res.json({
     success: true,
-    importadas,
-    ignoradas,
+    importadas: importadas.slice(0, LIMITE_DETALHE),
+    ignoradas: ignoradas.slice(0, LIMITE_DETALHE),
+    totalImportadas: importadas.length,
+    totalIgnoradas: ignoradas.length,
     totalCompras: importadas.filter(n => n.direcao === "compra").length,
     totalVendas: importadas.filter(n => n.direcao === "venda").length,
+    zipsAbertos,
+    xmlsLidos: arquivos.length,
   });
 });
 
