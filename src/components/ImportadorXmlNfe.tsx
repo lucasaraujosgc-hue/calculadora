@@ -47,6 +47,7 @@ interface ConversaoDaNota {
   chaveDestino: string;
   fator: number;
   nomeOrigem: string;
+  nomeDestino: string;
   unidadeComercial: string;
   unidadeTributavel: string;
 }
@@ -373,7 +374,26 @@ export default function ImportadorXmlNfe() {
     nomeDestino: s.nomeDestino,
   });
 
-  const desfazerConversaoDaNota = (c: ConversaoDaNota) => decidirVinculo({
+  const confirmarConversaoDaNota = async (c: ConversaoDaNota) => {
+    const fator = fatoresSugeridos[c.chaveOrigem] ?? c.fator;
+    if (!(fator > 0)) {
+      setErroVinculo(`Informe quantas unidades vêm em "${c.nomeOrigem}".`);
+      return;
+    }
+    setErroVinculo('');
+    await decidirVinculo({
+      chaveOrigem: c.chaveOrigem,
+      chaveDestino: c.chaveDestino,
+      fator,
+      status: 'confirmado',
+      origem: 'nota',
+      nomeOrigem: c.nomeOrigem,
+      nomeDestino: c.nomeDestino,
+      motivo: `Unidade tributável declarada na nota: ${c.fator} ${c.unidadeTributavel || 'un'} por ${c.unidadeComercial || 'embalagem'}.`,
+    });
+  };
+
+  const recusarConversaoDaNota = (c: ConversaoDaNota) => decidirVinculo({
     chaveOrigem: c.chaveOrigem,
     chaveDestino: c.chaveDestino,
     fator: c.fator,
@@ -530,8 +550,8 @@ export default function ImportadorXmlNfe() {
                 <div>
                   <p className="text-sm font-medium text-foreground">Vinculações para você conferir</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Nada aqui é decidido sozinho: as sugestões só passam a valer depois que você confirmar, e o que a
-                    nota declarou fica visível para você desfazer se não concordar.
+                    Nada aqui é aplicado sozinho — nem o que a nota declara. Cada vinculação só passa a valer depois que
+                    você confirmar, e você pode ajustar a quantidade por embalagem antes.
                   </p>
                 </div>
               </div>
@@ -592,27 +612,53 @@ export default function ImportadorXmlNfe() {
 
               {conversoesDaNota.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-emerald-900 uppercase tracking-wide">
-                    Convertidos pela própria nota ({conversoesDaNota.length}) — já aplicados
+                  <p className="text-xs font-semibold text-amber-900 uppercase tracking-wide">
+                    Embalagens declaradas na nota ({conversoesDaNota.length}) — ainda não aplicadas
                   </p>
-                  {conversoesDaNota.map(c => (
-                    <div key={c.chaveOrigem} className="bg-background border border-border rounded-md p-3 flex flex-col sm:flex-row sm:items-center gap-2">
-                      <p className="text-sm flex-1">
-                        <strong className="text-foreground">{c.nomeOrigem}</strong>
-                        <span className="text-muted-foreground">
-                          {' '}— comprado em {c.unidadeComercial || 'embalagem'}, com{' '}
-                          {c.fator.toLocaleString('pt-BR')} {c.unidadeTributavel || 'un'} por embalagem informados na nota.
-                        </span>
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => desfazerConversaoDaNota(c)}
-                        className="px-3 py-1.5 border border-border rounded-md text-xs font-medium hover:bg-muted shrink-0"
-                      >
-                        Desfazer conversão
-                      </button>
-                    </div>
-                  ))}
+                  {conversoesDaNota.map(c => {
+                    const fator = fatoresSugeridos[c.chaveOrigem] ?? c.fator;
+                    return (
+                      <div key={c.chaveOrigem} className="bg-background border border-border rounded-md p-3">
+                        <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+                          <div className="flex-1 text-sm">
+                            <span className="text-muted-foreground">1 {c.unidadeComercial || 'embalagem'} de </span>
+                            <strong className="text-foreground">{c.nomeOrigem}</strong>
+                            <span className="text-muted-foreground"> contém </span>
+                            <input
+                              type="number"
+                              min={1}
+                              step="any"
+                              value={fator || ''}
+                              onChange={e => setFatoresSugeridos(prev => ({ ...prev, [c.chaveOrigem]: Number(e.target.value) }))}
+                              className="w-20 mx-1 px-2 py-1 border border-border rounded bg-background text-sm"
+                            />
+                            <span className="text-muted-foreground"> {c.unidadeTributavel || 'unidades'}</span>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => confirmarConversaoDaNota(c)}
+                              className="px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-xs font-medium hover:bg-primary/90"
+                            >
+                              Confirmar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => recusarConversaoDaNota(c)}
+                              className="px-3 py-1.5 border border-border rounded-md text-xs font-medium hover:bg-muted"
+                            >
+                              Não converter
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1.5">
+                          A própria nota informa {c.fator.toLocaleString('pt-BR')} {c.unidadeTributavel || 'un'} por{' '}
+                          {c.unidadeComercial || 'embalagem'} (unidade tributável). Enquanto você não confirmar, este item
+                          continua contado em {c.unidadeComercial || 'embalagem'}.
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -870,8 +916,17 @@ export default function ImportadorXmlNfe() {
                     {vinculos.filter(v => v.status === 'confirmado').map(v => (
                       <li key={v.id} className="flex items-center justify-between gap-2 text-xs">
                         <span className="text-muted-foreground truncate">
-                          1 <strong className="text-foreground">{v.nomeOrigem || v.chaveOrigem}</strong> ={' '}
-                          {v.fator.toLocaleString('pt-BR')} <strong className="text-foreground">{v.nomeDestino || v.chaveDestino}</strong>
+                          {v.origem === 'nota' ? (
+                            <>
+                              1 embalagem de <strong className="text-foreground">{v.nomeOrigem || v.chaveOrigem}</strong> ={' '}
+                              {v.fator.toLocaleString('pt-BR')} unidades
+                            </>
+                          ) : (
+                            <>
+                              1 <strong className="text-foreground">{v.nomeOrigem || v.chaveOrigem}</strong> ={' '}
+                              {v.fator.toLocaleString('pt-BR')} <strong className="text-foreground">{v.nomeDestino || v.chaveDestino}</strong>
+                            </>
+                          )}
                         </span>
                         <button
                           type="button"
@@ -896,7 +951,7 @@ export default function ImportadorXmlNfe() {
                     {vinculos.filter(v => v.status === 'descartado').map(v => (
                       <li key={v.id} className="flex items-center justify-between gap-2 text-xs">
                         <span className="text-muted-foreground truncate">
-                          {v.origem === 'nota' ? 'Conversão da nota desfeita: ' : 'Sugestão recusada: '}
+                          {v.origem === 'nota' ? 'Embalagem da nota recusada: ' : 'Sugestão recusada: '}
                           <strong className="text-foreground">{v.nomeOrigem || v.chaveOrigem}</strong>
                         </span>
                         <button
@@ -916,9 +971,10 @@ export default function ImportadorXmlNfe() {
               <div className="flex items-start gap-2 p-3 bg-muted/50 border border-border rounded-md text-xs text-muted-foreground">
                 <Info className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>
-                  Compra em fardo e venda por unidade: quando a nota declara a embalagem (uCom ≠ uTrib), a conversão entra
-                  aplicada, mas fica listada acima para você desfazer. Quando a nota não declara, o sistema no máximo sugere —
-                  e a sugestão só vale depois que você confirmar. Você também pode vincular na mão, pelo botão ao lado do produto.
+                  Compra em fardo e venda por unidade: quando a nota declara a embalagem (uCom ≠ uTrib), o sistema propõe a
+                  conversão com o fator do documento; quando não declara, ele sugere pelo que consegue deduzir das descrições.
+                  Nos dois casos a conversão só vale depois que você confirmar. Você também pode vincular na mão, pelo botão
+                  ao lado do produto.
                   O custo médio já inclui frete, seguro, outras despesas, IPI e ICMS-ST da nota, descontado o desconto —
                   é o custo de aquisição de verdade. Devoluções, transferências e remessas ficam fora das médias para não
                   distorcer o preço. As médias são ponderadas pela quantidade.

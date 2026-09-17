@@ -1144,26 +1144,56 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
   const vinculos = await db.select().from(fiscalProductLinks)
     .where(eq(fiscalProductLinks.userId, req.currentUser.id));
 
-  // Só o que o usuário confirmou entra na conta. Sugestão nenhuma é aplicada
-  // sozinha — ela fica esperando o "confirmar".
-  const confirmados = vinculos.filter((v: any) => v.status === "confirmado");
-
-  // Uma conversão declarada pela nota que o usuário desfez volta ao valor
-  // original: a quantidade divide pelo fator e a chave volta a ser a da embalagem.
-  const desfeitas = new Map<string, any>();
+  // Nada é aplicado sem o usuário confirmar — nem o que veio da unidade
+  // tributável da nota. Vínculos entre produtos diferentes (manual/sugestão)
+  // são resolvidos por `aplicarVinculos`; as conversões de embalagem declaradas
+  // na nota são tratadas item a item logo abaixo, porque o parser já converteu.
+  const confirmados = vinculos.filter((v: any) => v.status === "confirmado" && v.origem !== "nota");
+  const conversoesConfirmadas = new Map<string, any>();
   for (const v of vinculos) {
-    if (v.origem === "nota" && v.status === "descartado") desfeitas.set(v.chaveOrigem, v);
+    if (v.origem === "nota" && v.status === "confirmado") conversoesConfirmadas.set(v.chaveOrigem, v);
   }
-  const itensAjustados = desfeitas.size === 0 ? itens : itens.map(entrada => {
+
+  /** Quantidade na unidade da embalagem, antes de qualquer conversão. */
+  const quantidadeNaEmbalagem = (item: any) =>
+    item.quantidadeComercial > 0
+      ? item.quantidadeComercial
+      : (item.fatorConversao > 0 ? item.quantidade / item.fatorConversao : item.quantidade);
+
+  const itensAjustados = itens.map(entrada => {
     const item = entrada.item;
-    if (!item.convertidoPorEmbalagem || item.fatorConversao <= 0) return entrada;
-    if (!desfeitas.has(item.chaveComercial)) return entrada;
-    const quantidade = item.quantidade / item.fatorConversao;
+    if (!item.convertidoPorEmbalagem) return entrada;
+
+    const confirmada = conversoesConfirmadas.get(item.chaveComercial);
+    if (confirmada) {
+      // Confirmada: vale o fator que o usuário aceitou, que pode ser diferente
+      // do declarado se a nota veio errada. Recalculamos a partir da quantidade
+      // da embalagem para não acumular arredondamento.
+      const fator = confirmada.fator > 0 ? confirmada.fator : item.fatorConversao;
+      const quantidade = quantidadeNaEmbalagem(item) * fator;
+      return {
+        ...entrada,
+        item: {
+          ...item,
+          quantidade,
+          valorUnitario: quantidade > 0 ? item.valorProduto / quantidade : 0,
+          valorUnitarioLiquido: quantidade > 0 ? item.valorLiquido / quantidade : 0,
+          fatorConversao: fator,
+        },
+      };
+    }
+
+    // Pendente ou recusada: o item volta a ser contado na embalagem. O GTIN
+    // também volta ao da embalagem — senão a embalagem e a unidade apareceriam
+    // na tela com o mesmo código de barras.
+    const quantidade = quantidadeNaEmbalagem(item);
     return {
       ...entrada,
       item: {
         ...item,
         chaveProduto: item.chaveComercial,
+        ean: item.eanComercial,
+        origemChave: (item.eanComercial ? "ean" : "descricao") as "ean" | "descricao",
         unidade: item.unidadeComercial || item.unidade,
         quantidade,
         valorUnitario: quantidade > 0 ? item.valorProduto / quantidade : 0,
@@ -1175,27 +1205,28 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
 
   const produtos = resumirPorProdutoPeriodo(aplicarVinculos(itensAjustados, confirmados as any), { de, ate });
 
-  // Sugestões novas: pares que o sistema acha que são o mesmo produto em
-  // embalagens diferentes. Nada disso vale antes de o usuário confirmar.
-  const jaResolvidas = new Set<string>(vinculos.map((v: any) => v.chaveOrigem));
-  const sugestoesNovas = sugerirVinculos(produtos, { jaResolvidas });
-
-  // As conversões que a nota declarou aparecem para revisão, mesmo já aplicadas.
-  const conversoesDaNota = new Map<string, any>();
-  for (const { item } of itensAjustados) {
+  // Conversões que a nota declarou e ainda esperam decisão.
+  const decididas = new Set<string>(vinculos.map((v: any) => v.chaveOrigem));
+  const conversoesPendentes = new Map<string, any>();
+  for (const { item } of itens) {
     if (!item.convertidoPorEmbalagem) continue;
-    if (desfeitas.has(item.chaveComercial)) continue;
-    if (conversoesDaNota.has(item.chaveComercial)) continue;
-    conversoesDaNota.set(item.chaveComercial, {
+    if (decididas.has(item.chaveComercial)) continue;
+    if (conversoesPendentes.has(item.chaveComercial)) continue;
+    conversoesPendentes.set(item.chaveComercial, {
       chaveOrigem: item.chaveComercial,
       chaveDestino: item.chaveProduto,
       fator: item.fatorConversao,
       nomeOrigem: item.descricao,
       nomeDestino: item.descricao,
       unidadeComercial: item.unidadeComercial,
-      unidadeTributavel: item.unidade,
+      unidadeTributavel: item.unidadeTributavel || item.unidade,
     });
   }
+
+  // O que já está na fila como conversão da nota não precisa virar sugestão por
+  // semelhança de descrição: a nota traz o fator exato, é a proposta melhor.
+  const jaResolvidas = new Set<string>([...decididas, ...conversoesPendentes.keys()]);
+  const sugestoesNovas = sugerirVinculos(produtos, { jaResolvidas });
 
   const competencias = [...new Set(linhas.map((l: any) => l.competencia))].sort();
   res.json({
@@ -1213,7 +1244,7 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
       nomeDestino: v.nomeDestino,
     })),
     sugestoes: sugestoesNovas,
-    conversoesDaNota: [...conversoesDaNota.values()],
+    conversoesDaNota: [...conversoesPendentes.values()],
   });
 });
 
