@@ -38,11 +38,33 @@ export interface ItemNota {
   descricao: string;
   ncm: string;
   cfop: string;
-  /** uCom. */
+  /** Unidade em que as médias são apuradas (uTrib quando o item foi convertido). */
   unidade: string;
+  /** Quantidade na unidade acima. */
   quantidade: number;
-  /** vUnCom — valor unitário comercial, sem rateio de frete e acessórios. */
+  /** Valor unitário na unidade acima, sem rateio de frete e acessórios. */
   valorUnitario: number;
+  /** uCom — unidade em que a nota foi emitida (ex.: CX, FD). */
+  unidadeComercial: string;
+  /** qCom — quantidade na unidade comercial. */
+  quantidadeComercial: number;
+  /** uTrib — unidade tributável declarada na nota (ex.: UN). */
+  unidadeTributavel: string;
+  /** qTrib — quantidade na unidade tributável. */
+  quantidadeTributavel: number;
+  /** cEANTrib, quando é um GTIN válido. */
+  eanTributavel: string;
+  /**
+   * Quantas unidades tributáveis cabem em uma unidade comercial (qTrib ÷ qCom).
+   * Num fardo de 12, vale 12.
+   */
+  fatorConversao: number;
+  /**
+   * A própria nota declarou que a unidade comercial é uma embalagem (uCom ≠
+   * uTrib), então o item foi convertido para a unidade tributável — é assim que
+   * uma compra em fardo casa com uma venda por unidade.
+   */
+  convertidoPorEmbalagem: boolean;
   /** vProd. */
   valorProduto: number;
   desconto: number;
@@ -130,4 +152,17 @@ export interface ResumoProduto {
   variacaoCustoPercent: number | null;
   /** Variação percentual do preço entre a primeira e a última competência com venda. */
   variacaoPrecoPercent: number | null;
+}
+
+/** Vínculo manual entre dois produtos com unidades diferentes. */
+export interface VinculoProduto {
+  /** Chave do produto como ele aparece nas notas (ex.: o fardo). */
+  chaveOrigem: string;
+  /** Chave do produto para o qual ele deve ser convertido (ex.: a unidade). */
+  chaveDestino: string;
+  /**
+   * Quantas unidades do produto destino há em uma unidade do produto de origem.
+   * Um fardo com 12 latas vale 12.
+   */
+  fator: number;
 }

@@ -243,3 +243,49 @@ describe('Direção da nota pelo CNPJ da empresa', () => {
     expect(direcaoDaNota(nota, cpf).direcao).toBe('venda');
   });
 });
+
+describe('Compra em fardo, venda por unidade', () => {
+  const FARDO = `<?xml version="1.0"?><nfeProc><NFe><infNFe Id="NFe35240612345678000199550010000009991000000017">
+<ide><mod>55</mod><serie>1</serie><nNF>999</nNF><dhEmi>2026-06-10T09:00:00-03:00</dhEmi><tpNF>1</tpNF></ide>
+<emit><CNPJ>98765432000111</CNPJ><xNome>Fabrica</xNome></emit>
+<dest><CNPJ>12345678000199</CNPJ><xNome>Distribuidora</xNome></dest>
+<det nItem="1"><prod>
+  <cProd>FD-500</cProd><cEAN>17891000100100</cEAN><xProd>REFRIGERANTE COLA FARDO C/12</xProd>
+  <NCM>22021000</NCM><CFOP>1102</CFOP>
+  <uCom>CX</uCom><qCom>10.0000</qCom><vUnCom>72.0000</vUnCom><vProd>720.00</vProd>
+  <cEANTrib>7891000100103</cEANTrib><uTrib>UN</uTrib><qTrib>120.0000</qTrib><vUnTrib>6.0000</vUnTrib>
+</prod><imposto/></det>
+<total><ICMSTot><vNF>720.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>`;
+
+  it('usa a unidade tributável que a própria nota declara', () => {
+    const item = lerNotaFiscal(FARDO).itens[0];
+    expect(item.convertidoPorEmbalagem).toBe(true);
+    expect(item.unidadeComercial).toBe('CX');
+    expect(item.quantidadeComercial).toBe(10);
+    expect(item.unidade).toBe('UN');
+    expect(item.quantidade).toBe(120);
+    expect(item.fatorConversao).toBe(12);
+  });
+
+  it('o custo unitário sai por unidade, não por fardo', () => {
+    const item = lerNotaFiscal(FARDO).itens[0];
+    expect(item.valorUnitarioLiquido).toBeCloseTo(6, 10); // 720 ÷ 120
+  });
+
+  it('a chave passa a ser o GTIN da unidade, para casar com a venda', () => {
+    const item = lerNotaFiscal(FARDO).itens[0];
+    expect(item.chaveProduto).toBe('7891000100103'); // e não o DUN-14 da embalagem
+    expect(item.eanTributavel).toBe('7891000100103');
+  });
+
+  it('não converte quando a unidade comercial já é a tributável', () => {
+    const semEmbalagem = FARDO
+      .replace('<uCom>CX</uCom>', '<uCom>UN</uCom>')
+      .replace('<qCom>10.0000</qCom>', '<qCom>120.0000</qCom>');
+    const item = lerNotaFiscal(semEmbalagem).itens[0];
+    expect(item.convertidoPorEmbalagem).toBe(false);
+    expect(item.quantidade).toBe(120);
+    expect(item.fatorConversao).toBe(1);
+  });
+});

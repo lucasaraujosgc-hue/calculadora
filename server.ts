@@ -12,14 +12,14 @@ import crypto from "crypto";
 import { db } from "./src/db/index.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots, store,
-  fiscalDocuments, fiscalItems } from "./src/db/schema.js";
+  fiscalDocuments, fiscalItems, fiscalProductLinks } from "./src/db/schema.js";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { ErroNotaFiscal, direcaoDaNota, lerNotaFiscal, somenteDigitos } from "./src/domain/fiscal/nfe.js";
-import { resumirPorProdutoPeriodo, type ItemComContexto } from "./src/domain/fiscal/agregacao.js";
+import { aplicarVinculos, resumirPorProdutoPeriodo, type ItemComContexto } from "./src/domain/fiscal/agregacao.js";
 
 dotenv.config();
 
@@ -1039,6 +1039,10 @@ app.post("/api/fiscal/import", requireUser, uploadXml.array("files", 300), async
             ncm: item.ncm,
             cfop: item.cfop,
             unidade: item.unidade,
+            unidadeComercial: item.unidadeComercial,
+            quantidadeComercial: item.quantidadeComercial,
+            fatorConversao: item.fatorConversao,
+            convertidoPorEmbalagem: item.convertidoPorEmbalagem,
             natureza: item.natureza,
             quantidade: item.quantidade,
             valorUnitario: item.valorUnitario,
@@ -1108,6 +1112,13 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
       unidade: l.unidade || "",
       quantidade: l.quantidade,
       valorUnitario: l.valorUnitario,
+      unidadeComercial: l.unidadeComercial || "",
+      quantidadeComercial: l.quantidadeComercial,
+      unidadeTributavel: l.convertidoPorEmbalagem ? (l.unidade || "") : "",
+      quantidadeTributavel: l.convertidoPorEmbalagem ? l.quantidade : 0,
+      eanTributavel: l.convertidoPorEmbalagem ? (l.ean || "") : "",
+      fatorConversao: l.fatorConversao,
+      convertidoPorEmbalagem: l.convertidoPorEmbalagem,
       valorProduto: l.valorProduto,
       desconto: l.desconto,
       frete: l.frete,
@@ -1126,8 +1137,76 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
     },
   }));
 
+  // Os vínculos convertem o produto-embalagem no produto vendido antes de somar.
+  const vinculos = await db.select().from(fiscalProductLinks)
+    .where(eq(fiscalProductLinks.userId, req.currentUser.id));
+
   const competencias = [...new Set(linhas.map((l: any) => l.competencia))].sort();
-  res.json({ competencias, produtos: resumirPorProdutoPeriodo(itens) });
+  res.json({
+    competencias,
+    produtos: resumirPorProdutoPeriodo(aplicarVinculos(itens, vinculos as any), { de, ate }),
+    vinculos: vinculos.map((v: any) => ({
+      id: v.id,
+      chaveOrigem: v.chaveOrigem,
+      chaveDestino: v.chaveDestino,
+      fator: v.fator,
+      nomeOrigem: v.nomeOrigem,
+      nomeDestino: v.nomeDestino,
+    })),
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vínculos entre produtos com unidades diferentes (fardo × unidade)
+// ---------------------------------------------------------------------------
+
+app.post("/api/fiscal/vinculos", requireUser, async (req: any, res) => {
+  try {
+    const chaveOrigem = String(req.body?.chaveOrigem ?? "").trim();
+    const chaveDestino = String(req.body?.chaveDestino ?? "").trim();
+    const fator = Number(req.body?.fator);
+
+    if (!chaveOrigem || !chaveDestino) return res.status(400).json({ error: "Informe os dois produtos." });
+    if (chaveOrigem === chaveDestino) return res.status(400).json({ error: "Escolha dois produtos diferentes." });
+    if (!Number.isFinite(fator) || fator <= 0) return res.status(400).json({ error: "A quantidade por embalagem precisa ser maior que zero." });
+
+    // Um vínculo de volta fecharia um ciclo (A→B e B→A) e nada seria convertido.
+    const existentes = await db.select().from(fiscalProductLinks)
+      .where(eq(fiscalProductLinks.userId, req.currentUser.id));
+    if (existentes.some((v: any) => v.chaveOrigem === chaveDestino && v.chaveDestino === chaveOrigem)) {
+      return res.status(400).json({ error: "Já existe um vínculo no sentido contrário entre esses dois produtos." });
+    }
+
+    const valores = {
+      userId: req.currentUser.id,
+      chaveOrigem,
+      chaveDestino,
+      fator,
+      nomeOrigem: String(req.body?.nomeOrigem ?? "").trim() || null,
+      nomeDestino: String(req.body?.nomeDestino ?? "").trim() || null,
+    };
+
+    const salvo = await db.insert(fiscalProductLinks).values(valores)
+      .onConflictDoUpdate({
+        target: [fiscalProductLinks.userId, fiscalProductLinks.chaveOrigem],
+        set: { chaveDestino, fator, nomeOrigem: valores.nomeOrigem, nomeDestino: valores.nomeDestino },
+      })
+      .returning();
+
+    res.json({ success: true, vinculo: salvo[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Erro ao salvar o vínculo." });
+  }
+});
+
+app.delete("/api/fiscal/vinculos/:id", requireUser, async (req: any, res) => {
+  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (!uuidRegex.test(req.params.id)) return res.status(400).json({ error: "Identificador inválido." });
+  await db.delete(fiscalProductLinks).where(and(
+    eq(fiscalProductLinks.id, req.params.id as any),
+    eq(fiscalProductLinks.userId, req.currentUser.id)
+  ));
+  res.json({ success: true });
 });
 
 /** Notas importadas, da mais recente para a mais antiga. */

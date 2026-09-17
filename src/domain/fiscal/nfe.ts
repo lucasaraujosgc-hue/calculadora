@@ -134,7 +134,10 @@ function montarItem(det: any): ItemNota {
   const prod = det?.prod ?? {};
   const imposto = det?.imposto ?? {};
 
-  const quantidade = paraNumero(prod.qCom) || paraNumero(prod.qTrib);
+  const quantidadeComercial = paraNumero(prod.qCom);
+  const quantidadeTributavel = paraNumero(prod.qTrib);
+  const unidadeComercial = String(prod.uCom ?? '').trim();
+  const unidadeTributavel = String(prod.uTrib ?? '').trim();
   const valorProduto = paraNumero(prod.vProd);
   const desconto = paraNumero(prod.vDesc);
   const frete = paraNumero(prod.vFrete);
@@ -152,11 +155,39 @@ function montarItem(det: any): ItemNota {
   // pagos ao fornecedor e, em regra, não geram crédito.
   const valorLiquido = valorProduto - desconto + frete + seguro + outros + ipi + icmsSt;
 
-  const ean = eanValido(prod.cEAN) ? somenteDigitos(prod.cEAN)
-    : eanValido(prod.cEANTrib) ? somenteDigitos(prod.cEANTrib)
-      : '';
+  const eanComercial = eanValido(prod.cEAN) ? somenteDigitos(prod.cEAN) : '';
+  const eanTributavel = eanValido(prod.cEANTrib) ? somenteDigitos(prod.cEANTrib) : '';
   const descricao = String(prod.xProd ?? '').trim();
+
+  // Quando a nota diz que a unidade comercial é uma embalagem (uCom ≠ uTrib e
+  // qTrib ≠ qCom), o próprio documento já informa quantas unidades tem dentro.
+  // É esse número que faz uma compra em fardo casar com uma venda por unidade:
+  // 10 caixas de 12 viram 120 unidades, e o custo unitário sai certo.
+  const convertidoPorEmbalagem =
+    quantidadeComercial > 0
+    && quantidadeTributavel > 0
+    && quantidadeTributavel !== quantidadeComercial
+    && unidadeTributavel !== ''
+    && unidadeTributavel !== unidadeComercial;
+
+  const quantidade = convertidoPorEmbalagem
+    ? quantidadeTributavel
+    : (quantidadeComercial || quantidadeTributavel);
+  const unidade = convertidoPorEmbalagem ? unidadeTributavel : unidadeComercial;
+  const valorUnitario = convertidoPorEmbalagem
+    ? paraNumero(prod.vUnTrib)
+    : paraNumero(prod.vUnCom);
+
+  // Convertido o item, a chave também tem de ser a da unidade — senão o fardo
+  // continuaria sendo um produto diferente da lata.
+  const ean = convertidoPorEmbalagem
+    ? (eanTributavel || eanComercial)
+    : (eanComercial || eanTributavel);
   const chaveProduto = ean || normalizarDescricao(descricao);
+
+  const fatorConversao = quantidadeComercial > 0 && quantidadeTributavel > 0
+    ? quantidadeTributavel / quantidadeComercial
+    : 1;
 
   const cfop = String(prod.CFOP ?? '').trim();
 
@@ -167,9 +198,16 @@ function montarItem(det: any): ItemNota {
     descricao,
     ncm: String(prod.NCM ?? '').trim(),
     cfop,
-    unidade: String(prod.uCom ?? '').trim(),
+    unidade,
     quantidade,
-    valorUnitario: paraNumero(prod.vUnCom),
+    valorUnitario,
+    unidadeComercial,
+    quantidadeComercial,
+    unidadeTributavel,
+    quantidadeTributavel,
+    eanTributavel,
+    fatorConversao,
+    convertidoPorEmbalagem,
     valorProduto,
     desconto,
     frete,

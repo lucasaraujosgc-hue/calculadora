@@ -16,6 +16,7 @@ import type {
   NotaFiscal,
   ResumoPeriodo,
   ResumoProduto,
+  VinculoProduto,
 } from './tipos';
 
 /** Um item já situado na nota a que pertence. */
@@ -36,6 +37,67 @@ export function achatarNotas(
     }
   }
   return saida;
+}
+
+/**
+ * Converte os itens de um produto-embalagem para o produto que a empresa
+ * realmente vende, usando os vínculos que ela cadastrou.
+ *
+ * É o caso da distribuidora que compra em fardo e revende por unidade: a nota
+ * de compra traz "1 FARDO C/12" e a de venda traz "1 LATA". Com o vínculo
+ * "1 fardo = 12 latas", as 10 caixas compradas viram 120 latas e o custo
+ * unitário sai na mesma unidade do preço de venda.
+ *
+ * O valor em reais não muda — só a quantidade e a chave do produto. Vínculos
+ * encadeados são seguidos (caixa → fardo → lata), com trava contra ciclos.
+ */
+export function aplicarVinculos(
+  itens: ItemComContexto[],
+  vinculos: VinculoProduto[]
+): ItemComContexto[] {
+  if (vinculos.length === 0) return itens;
+
+  const porOrigem = new Map<string, VinculoProduto>();
+  for (const v of vinculos) {
+    if (v.chaveOrigem && v.chaveDestino && v.fator > 0 && v.chaveOrigem !== v.chaveDestino) {
+      porOrigem.set(v.chaveOrigem, v);
+    }
+  }
+  if (porOrigem.size === 0) return itens;
+
+  /** Segue a corrente de vínculos até o produto final. */
+  const resolver = (chave: string): { chave: string; fator: number } => {
+    let atual = chave;
+    let fator = 1;
+    const visitados = new Set<string>([chave]);
+    for (let i = 0; i < 10; i += 1) {
+      const vinculo = porOrigem.get(atual);
+      if (!vinculo || visitados.has(vinculo.chaveDestino)) break;
+      fator *= vinculo.fator;
+      atual = vinculo.chaveDestino;
+      visitados.add(atual);
+    }
+    return { chave: atual, fator };
+  };
+
+  return itens.map(entrada => {
+    const { chave, fator } = resolver(entrada.item.chaveProduto);
+    if (chave === entrada.item.chaveProduto || fator === 1) return entrada;
+
+    const quantidade = entrada.item.quantidade * fator;
+    return {
+      ...entrada,
+      item: {
+        ...entrada.item,
+        chaveProduto: chave,
+        quantidade,
+        // O total pago não muda; o que muda é em quantas unidades ele se divide.
+        valorUnitario: quantidade > 0 ? entrada.item.valorProduto / quantidade : 0,
+        valorUnitarioLiquido: quantidade > 0 ? entrada.item.valorLiquido / quantidade : 0,
+        fatorConversao: entrada.item.fatorConversao * fator,
+      },
+    };
+  });
 }
 
 interface Acumulador {
@@ -135,9 +197,11 @@ export function resumirPorProdutoPeriodo(
       };
       porProduto.set(item.chaveProduto, produto);
     }
-    // A descrição da venda costuma ser a que a empresa usa no dia a dia; a da
-    // compra é a do fornecedor. Preferimos a da venda quando aparecer.
+    // A descrição e a unidade da venda são as que a empresa usa no dia a dia; as
+    // da compra são as do fornecedor, e podem estar na embalagem (CX) mesmo
+    // depois de o item ter sido convertido para unidade.
     if (direcao === 'venda' && item.descricao) produto.descricao = item.descricao;
+    if (direcao === 'venda' && item.unidade) produto.unidade = item.unidade;
     if (!produto.ean && item.ean) produto.ean = item.ean;
     if (!produto.ncm && item.ncm) produto.ncm = item.ncm;
     if (item.codigo) produto.codigos.add(item.codigo);

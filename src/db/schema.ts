@@ -150,6 +150,13 @@ export const fiscalItems = pgTable('fiscal_items', {
   ncm: text('ncm'),
   cfop: text('cfop'),
   unidade: text('unidade'),
+  /** Unidade e quantidade como a nota foi emitida (ex.: 10 CX). */
+  unidadeComercial: text('unidade_comercial'),
+  quantidadeComercial: doublePrecision('quantidade_comercial').default(0).notNull(),
+  /** Quantas unidades cabem na embalagem — 12 num fardo de 12. */
+  fatorConversao: doublePrecision('fator_conversao').default(1).notNull(),
+  /** A nota declarou embalagem (uCom ≠ uTrib) e o item foi convertido. */
+  convertidoPorEmbalagem: boolean('convertido_por_embalagem').default(false).notNull(),
   /** 'normal', 'devolucao', 'transferencia', 'remessa' ou 'outro'. */
   natureza: text('natureza').default('normal').notNull(),
   quantidade: doublePrecision('quantidade').default(0).notNull(),
@@ -172,4 +179,29 @@ export const fiscalItems = pgTable('fiscal_items', {
 }, (t) => ({
   porUsuarioProduto: index('fiscal_items_user_produto_idx').on(t.userId, t.chaveProduto),
   porUsuarioCompetencia: index('fiscal_items_user_competencia_idx').on(t.userId, t.competencia),
+}));
+
+/**
+ * Vínculo manual entre produtos com unidades diferentes.
+ *
+ * Serve para o caso em que a nota de compra não declara a embalagem: a empresa
+ * compra "FARDO REFRI C/12" e vende "REFRI LATA", e diz aqui que um fardo vale
+ * 12 unidades. A partir daí, as compras do fardo entram no histórico do produto
+ * vendido, já convertidas.
+ */
+export const fiscalProductLinks = pgTable('fiscal_product_links', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  /** Chave do produto como aparece nas notas (a embalagem). */
+  chaveOrigem: text('chave_origem').notNull(),
+  /** Chave do produto para o qual ele é convertido (a unidade). */
+  chaveDestino: text('chave_destino').notNull(),
+  /** Quantas unidades do destino há em uma unidade da origem. */
+  fator: doublePrecision('fator').default(1).notNull(),
+  /** Guardados só para a tela conseguir mostrar nomes sem recalcular o resumo. */
+  nomeOrigem: text('nome_origem'),
+  nomeDestino: text('nome_destino'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  origemUnicaPorUsuario: unique('fiscal_product_links_user_origem_key').on(t.userId, t.chaveOrigem),
 }));

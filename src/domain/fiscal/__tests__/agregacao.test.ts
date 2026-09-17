@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   achatarNotas,
+  aplicarVinculos,
   competenciasDisponiveis,
   resumirPorProdutoPeriodo,
   sugerirCadastro,
@@ -20,6 +21,13 @@ function item(opcoes: Partial<ItemNota> & { quantidade: number; valorLiquido: nu
     cfop: '5102',
     unidade: 'UN',
     valorUnitario: opcoes.valorLiquido / opcoes.quantidade,
+    unidadeComercial: 'UN',
+    quantidadeComercial: opcoes.quantidade,
+    unidadeTributavel: 'UN',
+    quantidadeTributavel: opcoes.quantidade,
+    eanTributavel: ean,
+    fatorConversao: 1,
+    convertidoPorEmbalagem: false,
     valorProduto: opcoes.valorLiquido,
     desconto: 0,
     frete: 0,
@@ -196,5 +204,92 @@ describe('Achatamento das notas', () => {
     const achatado = achatarNotas([{ nota, direcao: 'compra' }]);
     expect(achatado).toHaveLength(2);
     expect(achatado.every(i => i.direcao === 'compra' && i.competencia === '2026-05')).toBe(true);
+  });
+});
+
+describe('Vínculo manual entre fardo e unidade', () => {
+  // A nota de compra não declarou embalagem: veio "1 fardo" por R$ 72, sem GTIN
+  // que case com a unidade vendida.
+  const compraFardo = ctx('2026-06', 'compra', item({
+    quantidade: 10, valorLiquido: 720, ean: '', descricao: 'FARDO REFRI C/12',
+    chaveProduto: 'FARDO REFRI C 12', origemChave: 'descricao', unidade: 'CX', valorProduto: 720,
+  }));
+  const vendaUnidade = ctx('2026-06', 'venda', item({
+    quantidade: 100, valorLiquido: 900, ean: '7891000100103', descricao: 'Refrigerante Cola Lata',
+  }));
+
+  it('sem vínculo, viram dois produtos e nenhum tem margem', () => {
+    const r = resumirPorProdutoPeriodo([compraFardo, vendaUnidade]);
+    expect(r).toHaveLength(2);
+    expect(r.every(p => p.periodos[0].margemBrutaPercent === null)).toBe(true);
+  });
+
+  it('com o vínculo, o fardo entra no histórico do produto vendido', () => {
+    const vinculados = aplicarVinculos([compraFardo, vendaUnidade], [
+      { chaveOrigem: 'FARDO REFRI C 12', chaveDestino: '7891000100103', fator: 12 },
+    ]);
+    const r = resumirPorProdutoPeriodo(vinculados);
+    expect(r).toHaveLength(1);
+
+    const p = r[0].periodos[0];
+    expect(p.quantidadeComprada).toBe(120); // 10 fardos × 12
+    expect(p.custoMedio).toBeCloseTo(6, 10); // 720 ÷ 120
+    expect(p.precoMedio).toBeCloseTo(9, 10);
+    expect(p.margemBrutaPercent).toBeCloseTo(((9 - 6) / 9) * 100, 10);
+  });
+
+  it('o total pago não muda com a conversão', () => {
+    const [convertido] = aplicarVinculos([compraFardo], [
+      { chaveOrigem: 'FARDO REFRI C 12', chaveDestino: '7891000100103', fator: 12 },
+    ]);
+    expect(convertido.item.valorLiquido).toBeCloseTo(720, 10);
+    expect(convertido.item.quantidade * convertido.item.valorUnitarioLiquido).toBeCloseTo(720, 10);
+  });
+
+  it('segue vínculos encadeados (caixa → fardo → lata)', () => {
+    const caixa = ctx('2026-06', 'compra', item({
+      quantidade: 2, valorLiquido: 1440, ean: '', descricao: 'CAIXA',
+      chaveProduto: 'CAIXA', origemChave: 'descricao', valorProduto: 1440,
+    }));
+    const [convertido] = aplicarVinculos([caixa], [
+      { chaveOrigem: 'CAIXA', chaveDestino: 'FARDO', fator: 10 },
+      { chaveOrigem: 'FARDO', chaveDestino: 'LATA', fator: 12 },
+    ]);
+    expect(convertido.item.chaveProduto).toBe('LATA');
+    expect(convertido.item.quantidade).toBe(240); // 2 × 10 × 12
+    expect(convertido.item.valorUnitarioLiquido).toBeCloseTo(6, 10);
+  });
+
+  it('não entra em laço quando os vínculos apontam um para o outro', () => {
+    const [convertido] = aplicarVinculos([compraFardo], [
+      { chaveOrigem: 'FARDO REFRI C 12', chaveDestino: 'B', fator: 2 },
+      { chaveOrigem: 'B', chaveDestino: 'FARDO REFRI C 12', fator: 3 },
+    ]);
+    expect(convertido.item.chaveProduto).toBe('B');
+    expect(convertido.item.quantidade).toBe(20);
+  });
+
+  it('ignora vínculos inválidos', () => {
+    const iguais = aplicarVinculos([compraFardo], [
+      { chaveOrigem: 'FARDO REFRI C 12', chaveDestino: 'FARDO REFRI C 12', fator: 12 },
+    ]);
+    expect(iguais[0].item.quantidade).toBe(10);
+    const fatorZero = aplicarVinculos([compraFardo], [
+      { chaveOrigem: 'FARDO REFRI C 12', chaveDestino: 'X', fator: 0 },
+    ]);
+    expect(fatorZero[0].item.quantidade).toBe(10);
+  });
+});
+
+describe('Unidade mostrada no resumo', () => {
+  it('usa a unidade da venda, não a da embalagem comprada', () => {
+    const compraEmCaixa = ctx('2026-06', 'compra', item({
+      quantidade: 240, valorLiquido: 960, unidade: 'CX', valorProduto: 960,
+    }));
+    const vendaEmUnidade = ctx('2026-06', 'venda', item({
+      quantidade: 200, valorLiquido: 1200, unidade: 'UN', valorProduto: 1200,
+    }));
+    const [r] = resumirPorProdutoPeriodo([compraEmCaixa, vendaEmUnidade]);
+    expect(r.unidade).toBe('UN');
   });
 });
