@@ -627,6 +627,15 @@ export default function SimuladorImpostos() {
   const economiaVsAtual = melhorRegime ? custoMensal - melhorRegime.imposto : 0;
   const mostrarEconomia = !!melhorRegime && melhorRegime.regime !== regimeAtualLabel[regime] && economiaVsAtual > 0.01;
 
+  // O rótulo de cada barra já sai pronto, com o troféu embutido no texto. O
+  // renderizador do recharts recebe um índice que pula as barras zeradas (o MEI
+  // fora do limite, por exemplo), então marcar o vencedor pelo índice colocaria
+  // o troféu na barra errada — aqui a marcação é por identidade do objeto.
+  const dadosComparacao = comparacaoRegimes.map(r => ({
+    ...r,
+    rotulo: `${formatCurrency(r.imposto)}${r === melhorRegime ? ' 🏆' : ''}`,
+  }));
+
   // Quanto a reforma muda em relação à carga de hoje, no regime selecionado.
   const diferencaReforma = reforma.totalReforma - custoMensal;
   const variacaoReformaPercent = custoMensal > 0 ? (diferencaReforma / custoMensal) * 100 : 0;
@@ -1378,7 +1387,7 @@ export default function SimuladorImpostos() {
 
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={comparacaoRegimes} layout="vertical" margin={{ top: 0, right: 70, left: 20, bottom: 0 }}>
+                <BarChart data={dadosComparacao} layout="vertical" margin={{ top: 0, right: 70, left: 20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                   <XAxis type="number" axisLine={false} tickLine={false} tickFormatter={v => `R$${v / 1000}k`} />
                   <YAxis dataKey="regime" type="category" axisLine={false} tickLine={false} width={110} />
@@ -1389,18 +1398,19 @@ export default function SimuladorImpostos() {
                     }}
                   />
                   <Bar dataKey="imposto" radius={[0, 4, 4, 0]} barSize={24}>
-                    {comparacaoRegimes.map((entry, index) => (
+                    {dadosComparacao.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.cor} />
                     ))}
                     <LabelList
-                      dataKey="imposto"
+                      dataKey="rotulo"
                       position="right"
                       content={(props: any) => {
                         const { x, y, width, height, value } = props;
-                        const isBest = melhorRegime != null && Math.abs(value - melhorRegime.imposto) < 0.005;
+                        const texto = String(value ?? '');
+                        const isBest = texto.includes('🏆');
                         return (
                           <text x={x + width + 8} y={y + height / 2} dy={4} fontSize={12} fontWeight={isBest ? 700 : 500} fill={isBest ? '#059669' : '#64748b'}>
-                            {formatCurrency(value)}{isBest ? ' 🏆' : ''}
+                            {texto}
                           </text>
                         );
                       }}
