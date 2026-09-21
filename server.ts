@@ -1030,6 +1030,7 @@ function mapearProduto(p: typeof products.$inferSelect) {
     modoPrecificacao: p.modoPrecificacao || 'margem',
     despesasVariaveis: (p.despesasVariaveis as Record<string, number>) || {},
     estrategiaId: p.estrategiaId ?? null,
+    chaveFiscal: p.chaveFiscal ?? null,
     isSample: p.isSample,
   };
 }
@@ -1870,8 +1871,17 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
     const existentes = await db.select().from(products)
       .where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
 
+    // O elo forte é a chave fiscal, gravada na primeira vez que este produto
+    // recebeu valores de uma nota. O nome é só a rede de segurança para o que
+    // foi cadastrado antes de existir chave — e é uma rede furada: renomear o
+    // produto no cadastro fazia a próxima aplicação não encontrar nada e criar
+    // um segundo produto, silenciosamente.
+    const porChave = new Map<string, any>();
     const porNome = new Map<string, any>();
-    for (const p of existentes) porNome.set(String(p.name).trim().toLowerCase(), p);
+    for (const p of existentes) {
+      if (p.chaveFiscal) porChave.set(p.chaveFiscal, p);
+      porNome.set(String(p.name).trim().toLowerCase(), p);
+    }
 
     let criados = 0;
     let atualizados = 0;
@@ -1883,12 +1893,16 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
       const cmv = Number(escolha.cmv) || 0;
       const precoVenda = Number(escolha.precoVenda) || 0;
       const vendasProjetadas = Number(escolha.vendasProjetadas) || 0;
-      const existente = porNome.get(nome.toLowerCase());
+      const chaveFiscal = String(escolha.chaveProduto ?? "").trim() || null;
+      const existente = (chaveFiscal && porChave.get(chaveFiscal)) || porNome.get(nome.toLowerCase());
 
       if (existente) {
         // Só sobrescreve o que a importação de fato apurou: um produto sem
         // compra no período não pode zerar o CMV que já estava cadastrado.
         const patch: any = {};
+        // Produto cadastrado antes de existir chave: este é o momento de
+        // amarrá-lo, e a partir daqui o nome pode mudar à vontade.
+        if (chaveFiscal && !existente.chaveFiscal) patch.chaveFiscal = chaveFiscal;
         if (cmv > 0) patch.costPrice = cmv;
         if (precoVenda > 0) {
           patch.salePrice = precoVenda;
@@ -1905,7 +1919,7 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
           semEspaco.push(nome);
           continue;
         }
-        await db.insert(products).values({
+        const [novo] = await db.insert(products).values({
           userId: req.currentUser.id,
           name: nome,
           costPrice: cmv,
@@ -1913,8 +1927,13 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
           projectedSales: vendasProjetadas,
           precoFixo: precoVenda,
           modoPrecificacao: precoVenda > 0 ? "preco" : "margem",
+          chaveFiscal,
           isSample: false,
-        });
+        }).returning();
+        // Entra no mapa para que a mesma chave, repetida na seleção, atualize
+        // este produto em vez de criar outro.
+        if (chaveFiscal) porChave.set(chaveFiscal, novo);
+        porNome.set(nome.toLowerCase(), novo);
         criados += 1;
       }
     }

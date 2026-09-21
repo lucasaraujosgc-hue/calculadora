@@ -36,6 +36,13 @@
       "when": 1790200000000,
       "tag": "0004_piso_margem",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790300000000,
+      "tag": "0005_chave_fiscal",
+      "breakpoints": true
     }
   ]
 }

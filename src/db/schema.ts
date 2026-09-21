@@ -53,10 +53,26 @@ export const products = pgTable('products', {
    * `null` = Personalizado: vale a margem do próprio produto.
    */
   estrategiaId: uuid('estrategia_id'),
+  /**
+   * Produto correspondente nas notas fiscais (`fiscal_items.chave_produto`).
+   *
+   * Gravado quando o usuário aplica os valores de uma nota a este produto —
+   * momento em que o casamento é inequívoco, porque foi ele quem escolheu a
+   * linha. Daí em diante o elo é o id, não o nome: renomear o produto no
+   * cadastro deixa de desfazer o vínculo.
+   *
+   * Sem índice único de propósito. A chave só é escrita pela rota de aplicação,
+   * nunca pelo cliente, então duas linhas com a mesma chave não têm como
+   * aparecer pela API — e uma constraint aqui transformaria um caso de dado
+   * torto num erro 500 no meio de uma importação.
+   */
+  chaveFiscal: text('chave_fiscal'),
   isSample: boolean('is_sample').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+}, (t) => ({
+  porUsuarioChaveFiscal: index('products_user_chave_fiscal_idx').on(t.userId, t.chaveFiscal),
+}));
 
 /**
  * Despesas variáveis que cada usuário cria para si (ex.: "Frete", "Embalagem",

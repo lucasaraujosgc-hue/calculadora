@@ -288,6 +288,10 @@ export default function ImportadorXmlNfe() {
         const s = sugestoes.get(p.chaveProduto)!;
         return {
           nome: p.descricao,
+          // A chave amarra este produto do cadastro ao das notas. Daqui em
+          // diante o reconhecimento é por ela, não pelo nome — que o usuário
+          // pode trocar quando quiser.
+          chaveProduto: p.chaveProduto,
           cmv: s.cmv,
           precoVenda: s.precoVenda,
           vendasProjetadas: s.vendasProjetadas,
