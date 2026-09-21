@@ -160,9 +160,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // As três faixas com que toda conta começa — as mesmas que o servidor semeia
   // no primeiro acesso, repetidas aqui para o modo visitante nascer igual.
   const estrategiasPadrao: EstrategiaItem[] = [
-    { id: 'estrategia-atracao', nome: 'Atração', margem: 10, cor: 'sky', posicao: 0 },
-    { id: 'estrategia-padrao', nome: 'Padrão', margem: 20, cor: 'slate', posicao: 1 },
-    { id: 'estrategia-alta', nome: 'Margem alta', margem: 30, cor: 'emerald', posicao: 2 },
+    { id: 'estrategia-sem-margem', nome: 'Sem margem', margem: 0, cor: 'rose', posicao: 0 },
+    { id: 'estrategia-atracao', nome: 'Atração', margem: 10, cor: 'sky', posicao: 1 },
+    { id: 'estrategia-padrao', nome: 'Padrão', margem: 20, cor: 'slate', posicao: 2 },
+    { id: 'estrategia-alta', nome: 'Margem alta', margem: 30, cor: 'emerald', posicao: 3 },
   ];
 
   const [estrategias, setEstrategias] = useState<EstrategiaItem[]>(() => {

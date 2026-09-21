@@ -19,6 +19,7 @@ import {
   Receipt,
   Users,
   Tag,
+  BarChart3,
 } from 'lucide-react';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
 import { calcularMix, calculateSellingPrice } from '../domain/pricing';
@@ -34,12 +35,15 @@ import { FileText } from 'lucide-react';
 import CostCompositionChart from '../components/CostCompositionChart';
 import DespesasVariaveisManager from '../components/DespesasVariaveisManager';
 import EstrategiasManager, { SeletorEstrategia, SeloEstrategia } from '../components/Estrategias';
+import CurvaABC, { SeloClasseABC } from '../components/CurvaABC';
+import { classificarABC, type CriterioABC, type MapeamentoABC } from '../domain/abc';
 
 type SortKey =
   | 'nome' | 'cmv' | 'vendas' | 'rateio' | 'imposto' | 'taxaCartao'
-  | 'comissao' | 'margem' | 'preco' | 'margemContribuicao' | 'valorMargem' | 'peUnidades';
+  | 'comissao' | 'margem' | 'preco' | 'margemContribuicao' | 'valorMargem' | 'peUnidades'
+  | 'classeABC';
 
-type FilterMode = 'todos' | 'sem-rateio' | 'prejuizo' | 'rateio-ocioso';
+type FilterMode = 'todos' | 'sem-rateio' | 'prejuizo' | 'rateio-ocioso' | 'classe-a' | 'classe-b' | 'classe-c';
 
 /**
  * Campo aplicável em massa. Os quatro primeiros são fixos; além deles entram as
@@ -106,6 +110,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'margemContribuicao', label: 'Margem de contribuição' },
   { key: 'valorMargem', label: 'Lucro líquido' },
   { key: 'peUnidades', label: 'Ponto de equilíbrio' },
+  { key: 'classeABC', label: 'Classe ABC' },
   { key: 'cmv', label: 'CMV' },
   { key: 'imposto', label: 'Imposto (%)' },
   { key: 'taxaCartao', label: 'Taxa cartão (%)' },
@@ -164,6 +169,8 @@ export default function MixPrecoLote() {
   const [bulkInputs, setBulkInputs] = useState<Record<BulkField, number>>({});
   const [bulkSnapshots, setBulkSnapshots] = useState<Partial<Record<BulkField, Record<string, number>>>>({});
   const [isPadronizarOpen, setIsPadronizarOpen] = useState(false);
+  const [isAbcOpen, setIsAbcOpen] = useState(false);
+  const [criterioABC, setCriterioABC] = useState<CriterioABC>('faturamento');
 
   // Painel de pesos da distribuição inteligente (aberto ao clicar em "Distribuir inteligente")
   const [minRateioValor, setMinRateioValor] = useState<number | ''>('');
@@ -220,6 +227,43 @@ export default function MixPrecoLote() {
   // que o export do Excel passou a mostrar números diferentes da tela.
   const mix = calcularMix(validProdutos, custoFixoTotal, despesasVariaveis, estrategias);
 
+  // Curva ABC sobre o mix já calculado — o preço em vigor de cada produto, não
+  // uma segunda conta paralela.
+  const abc = useMemo(() => classificarABC(mix.produtos.map(p => {
+    const vendas = p.vendasProjetadas || 0;
+    const valor = criterioABC === 'quantidade' ? vendas
+      : criterioABC === 'margem' ? p.margemContribuicao * vendas
+      : p.preco * vendas;
+    return { id: p.id, valor };
+  })), [mix, criterioABC]);
+
+  /**
+   * Roda o mix como ficaria se o mapeamento fosse aplicado, sem aplicar.
+   *
+   * Existe porque trocar a faixa das classes mexe no preço de dezenas de
+   * produtos de uma vez: sem ver o resultado antes, o usuário só descobre que
+   * cortou o lucro pela metade depois de ter cortado.
+   */
+  const simularPorClasse = (mapa: MapeamentoABC) => {
+    const hipotetico = validProdutos.map(p => {
+      const classe = abc.porId[p.id]?.classe;
+      const destino = classe ? mapa[classe] : null;
+      return destino ? { ...p, estrategiaId: destino } : p;
+    });
+    return calcularMix(hipotetico, custoFixoTotal, despesasVariaveis, estrategias);
+  };
+
+  /** Põe cada produto na faixa escolhida para a classe dele. */
+  const aplicarEstrategiasPorClasse = (mapa: MapeamentoABC) => {
+    const updated = produtos.map(p => {
+      const classe = abc.porId[p.id]?.classe;
+      const destino = classe ? mapa[classe] : null;
+      return destino ? { ...p, estrategiaId: destino } : p;
+    });
+    setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
+  };
+
+
   const receitaTotal = mix.receitaTotal;
   const margemTotal = mix.margemContribuicaoTotal;
   const vendasTotais = mix.vendasTotais;
@@ -265,6 +309,9 @@ export default function MixPrecoLote() {
       vendas,
       semRateio: (p.percentualRateio || 0) === 0,
       projecaoReforma,
+      classeABCLetra: abc.porId[p.id]?.classe,
+      // A ordenação usa número porque A tem que vir antes de B.
+      classeABC: abc.porId[p.id] ? { A: 1, B: 2, C: 3 }[abc.porId[p.id].classe] : 4,
     };
   });
 
@@ -282,9 +329,12 @@ export default function MixPrecoLote() {
     if (filterMode === 'sem-rateio') list = list.filter(p => p.semRateio);
     if (filterMode === 'prejuizo') list = list.filter(p => !p.isValidMargem);
     if (filterMode === 'rateio-ocioso') list = list.filter(p => p.rateioOcioso);
+    if (filterMode === 'classe-a') list = list.filter(p => p.classeABCLetra === 'A');
+    if (filterMode === 'classe-b') list = list.filter(p => p.classeABCLetra === 'B');
+    if (filterMode === 'classe-c') list = list.filter(p => p.classeABCLetra === 'C');
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [validProdutos, custosFixos, searchTerm, filterMode]);
+  }, [validProdutos, custosFixos, searchTerm, filterMode, abc]);
 
   const sortedProdutos = useMemo(() => {
     const list = [...filteredProdutos];
@@ -724,6 +774,47 @@ export default function MixPrecoLote() {
 
 
 
+      {/* Curva ABC: qual produto merece qual estratégia. Vem depois de
+          padronizar as variáveis porque depende dos preços já calculados. */}
+      <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+        <button
+          onClick={() => setIsAbcOpen(!isAbcOpen)}
+          className="w-full p-4 sm:p-6 flex items-center justify-between text-left transition-colors hover:bg-muted/30"
+        >
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-xl bg-violet-100 text-violet-800 flex items-center justify-center shrink-0">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                Curva ABC
+                <span className="text-[10px] uppercase tracking-wider font-bold bg-violet-100 text-violet-900 px-2 py-0.5 rounded-full">Passo 2</span>
+              </h2>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                Descubra quais produtos sustentam o resultado e aplique a estratégia certa a cada grupo.
+              </p>
+            </div>
+          </div>
+          <div className="text-primary p-2 bg-background rounded-full shadow-sm border border-border">
+            {isAbcOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          </div>
+        </button>
+
+        {isAbcOpen && (
+          <div className="p-4 sm:p-6 border-t border-border">
+            <CurvaABC
+              abc={abc}
+              criterio={criterioABC}
+              setCriterio={setCriterioABC}
+              onAplicar={aplicarEstrategiasPorClasse}
+              onSimular={simularPorClasse}
+              receitaAtual={receitaTotal}
+              lucroAtual={lucroMix}
+            />
+          </div>
+        )}
+      </div>
+
       <PainelReformaPreco config={reformaConfig} setConfig={setReformaConfig} motor={motorReforma} />
 
       {reformaConfig.ativo && (
@@ -821,6 +912,7 @@ export default function MixPrecoLote() {
                 <th className="px-3 py-3 sticky left-0 z-30 bg-muted/95 backdrop-blur border-r border-border w-[30%] min-w-[140px] text-xs">Produto</th>
                 <th className="px-2 py-3 text-center text-xs">Vendas</th>
                 <th className="px-2 py-3 text-center text-xs">Rateio%</th>
+                <th className="px-2 py-3 text-center text-xs">ABC</th>
                 <th className="px-2 py-3 text-center text-xs">Estratégia</th>
                 <th className="px-2 py-3 text-center bg-orange-50/80 text-orange-700 font-semibold text-xs border-x border-orange-200/50">Preço Sugerido</th>
                 <th className="px-2 py-3 text-center bg-primary text-primary-foreground text-xs">
@@ -878,6 +970,9 @@ export default function MixPrecoLote() {
                           onChange={(e) => handleUpdateProduto(p.id, { percentualRateio: Number(e.target.value) })}
                           className={`w-16 mx-auto block px-2 py-1 border rounded text-sm font-bold text-center ${p.semRateio ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-amber-300 text-amber-900'} focus:ring-2 focus:ring-amber-500/50`}
                         />
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <SeloClasseABC classe={p.classeABCLetra} />
                       </td>
                       <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                         <SeletorEstrategia
@@ -956,7 +1051,7 @@ export default function MixPrecoLote() {
                     {/* Painel expandido: mesmos elementos e campos editáveis do Mix de Preços */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={reformaConfig.ativo ? 8 : 7} className="p-0 bg-muted/20">
+                        <td colSpan={reformaConfig.ativo ? 9 : 8} className="p-0 bg-muted/20">
                           <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
                             {/* Inputs */}
                             <div className="col-span-1 lg:col-span-4 space-y-4">

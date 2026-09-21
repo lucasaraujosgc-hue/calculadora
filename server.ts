@@ -620,6 +620,9 @@ const MAX_ESTRATEGIAS = 8;
  * uma regra: o usuário renomeia, muda os percentuais, cria e apaga.
  */
 const ESTRATEGIAS_PADRAO = [
+  // 0% existe para o caso de venda a preço de custo (brinde, item de combo,
+  // queima de estoque) sem obrigar o usuário a cair em "Personalizado".
+  { name: "Sem margem", margem: 0, cor: "rose" },
   { name: "Atração", margem: 10, cor: "sky" },
   { name: "Padrão", margem: 20, cor: "slate" },
   { name: "Margem alta", margem: 30, cor: "emerald" },

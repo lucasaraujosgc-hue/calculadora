@@ -1,0 +1,273 @@
+import React, { useMemo, useState } from 'react';
+import { BarChart3, Info } from 'lucide-react';
+import {
+  CRITERIOS,
+  CORTE_A,
+  CORTE_B,
+  sugerirMapeamento,
+  type ClasseABC,
+  type CriterioABC,
+  type MapeamentoABC,
+  type ResultadoABC,
+} from '../domain/abc';
+import type { ResultadoMix } from '../domain/pricing';
+import { useAppContext } from '../context/AppContext';
+import { formatCurrency } from '../utils/format';
+
+/**
+ * Curva ABC do mix e sugestão de estratégia por classe.
+ *
+ * O sistema faz a parte trabalhosa — descobrir quais produtos respondem pelo
+ * grosso do resultado — e o usuário toma a decisão comercial: qual faixa de
+ * margem cabe a cada classe. Nada é aplicado sem ele confirmar, e a prévia diz
+ * quantos produtos mudam antes de mudar.
+ */
+
+/**
+ * Escala sequencial (A mais escuro -> C mais claro), porque A, B e C são uma
+ * ordem de importância, não categorias soltas. Escala validada para separação
+ * em daltonismo; ainda assim a classe sempre aparece escrita, nunca só pela cor.
+ */
+const CORES_ABC: Record<ClasseABC, { fill: string; selo: string }> = {
+  A: { fill: '#4c1d95', selo: 'bg-violet-100 text-violet-900 border-violet-300' },
+  B: { fill: '#7c3aed', selo: 'bg-violet-50 text-violet-800 border-violet-200' },
+  C: { fill: '#a78bfa', selo: 'bg-slate-50 text-slate-600 border-slate-200' },
+};
+
+const DESCRICAO_CLASSE: Record<ClasseABC, string> = {
+  A: `os poucos que fazem os primeiros ${CORTE_A}%`,
+  B: `os seguintes, até ${CORTE_B}%`,
+  C: 'a cauda longa',
+};
+
+/** Selo da classe para a tabela do Mix. */
+export function SeloClasseABC({ classe }: { classe?: ClasseABC }) {
+  if (!classe) return <span className="text-muted-foreground text-xs">—</span>;
+  return (
+    <span
+      className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-xs font-bold border ${CORES_ABC[classe].selo}`}
+      title={`Classe ${classe} — ${DESCRICAO_CLASSE[classe]}`}
+    >
+      {classe}
+    </span>
+  );
+}
+
+export default function CurvaABC({
+  abc,
+  criterio,
+  setCriterio,
+  onAplicar,
+  onSimular,
+  receitaAtual,
+  lucroAtual,
+}: {
+  abc: ResultadoABC;
+  criterio: CriterioABC;
+  setCriterio: (c: CriterioABC) => void;
+  onAplicar: (mapa: MapeamentoABC) => void;
+  /** Roda o mix como ficaria com este mapeamento, sem aplicar. */
+  onSimular: (mapa: MapeamentoABC) => ResultadoMix<any>;
+  receitaAtual: number;
+  lucroAtual: number;
+}) {
+  const { estrategias, produtos } = useAppContext();
+
+  const sugestao = useMemo(() => sugerirMapeamento(estrategias), [estrategias]);
+  const [mapa, setMapa] = useState<MapeamentoABC>(sugestao);
+  const [confirmando, setConfirmando] = useState(false);
+
+  // A sugestão muda quando o usuário mexe nas faixas; o mapeamento acompanha
+  // enquanto ele não tiver escolhido nada à mão.
+  const [tocado, setTocado] = useState(false);
+  const mapaEfetivo = tocado ? mapa : sugestao;
+
+  const formatarValor = (v: number) =>
+    criterio === 'quantidade' ? `${Math.round(v).toLocaleString('pt-BR')} un` : formatCurrency(v);
+
+  // Quantos produtos realmente mudariam de faixa — é o número que diz se vale
+  // apertar o botão, e evita a aplicação às cegas no catálogo inteiro.
+  const mudariam = useMemo(() => produtos.filter(p => {
+    const classe = abc.porId[p.id]?.classe;
+    if (!classe) return false;
+    const destino = mapaEfetivo[classe];
+    return !!destino && p.estrategiaId !== destino;
+  }).length, [produtos, abc, mapaEfetivo]);
+
+  // Prévia do impacto. Mover a classe A para uma faixa de margem menor barateia
+  // justamente os produtos que mais vendem, e isso derruba o resultado bem mais
+  // do que a diferença de pontos percentuais sugere. O número tem que estar na
+  // tela ANTES do clique.
+  const simulacao = useMemo(() => (mudariam > 0 ? onSimular(mapaEfetivo) : null), [mudariam, mapaEfetivo, onSimular]);
+  const deltaLucro = simulacao ? simulacao.lucroLiquidoTotal - lucroAtual : 0;
+  const deltaLucroPercent = simulacao && lucroAtual !== 0
+    ? (deltaLucro / Math.abs(lucroAtual)) * 100
+    : 0;
+  const deltaReceita = simulacao ? simulacao.receitaTotal - receitaAtual : 0;
+
+  const semDados = abc.total <= 0;
+  const criterioAtual = CRITERIOS.find(c => c.id === criterio)!;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+          <BarChart3 className="w-4 h-4 text-primary" /> Curva ABC do seu mix
+        </h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Quase sempre um punhado de produtos responde pela maior parte do resultado. São esses que o
+          cliente conhece de cor e compara de loja em loja — e é por isso que costumam pedir margem menor,
+          não maior.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-xs font-medium text-muted-foreground mb-1">Calcular a curva por</label>
+        <select
+          value={criterio}
+          onChange={e => setCriterio(e.target.value as CriterioABC)}
+          className="w-full sm:w-auto px-3 py-2 border border-border rounded-lg bg-background text-sm focus:ring-2 focus:ring-primary/50"
+        >
+          {CRITERIOS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+        </select>
+        <p className="text-[11px] text-muted-foreground mt-1">{criterioAtual.descricao}</p>
+      </div>
+
+      {semDados ? (
+        <p className="text-xs text-muted-foreground flex items-start gap-1.5 p-3 rounded-lg bg-muted/30 border border-border">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
+          Ainda não há {criterioAtual.label.toLowerCase()} para classificar. Preencha as vendas projetadas
+          dos produtos — ou importe suas notas fiscais — e a curva aparece aqui.
+        </p>
+      ) : (
+        <>
+          {/* Barra de proporção: a fatia de cada classe no total, com rótulo
+              direto em cada faixa que couber — a cor nunca carrega o dado
+              sozinha. O vão de 2px separa os segmentos. */}
+          <div>
+            <div className="flex w-full h-8 rounded-lg overflow-hidden gap-[2px] bg-background">
+              {abc.resumo.filter(c => c.participacao > 0).map(c => (
+                <div
+                  key={c.classe}
+                  style={{ width: `${c.participacao}%`, backgroundColor: CORES_ABC[c.classe].fill }}
+                  title={`Classe ${c.classe}: ${c.quantidade} produto(s), ${formatarValor(c.valor)} (${c.participacao.toFixed(1)}%)`}
+                  className="flex items-center justify-center min-w-0 first:rounded-l-lg last:rounded-r-lg"
+                >
+                  {c.participacao >= 8 && (
+                    <span className="text-[11px] font-bold text-white truncate px-1">
+                      {c.classe} · {c.participacao.toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Fatia de cada classe em {criterioAtual.label.toLowerCase()} — total de {formatarValor(abc.total)}.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {abc.resumo.map(c => (
+              <div key={c.classe} className="p-3 rounded-xl border border-border bg-background">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: CORES_ABC[c.classe].fill }} />
+                  <span className="text-xs font-bold text-foreground">Classe {c.classe}</span>
+                  <span className="text-[10px] text-muted-foreground truncate">{DESCRICAO_CLASSE[c.classe]}</span>
+                </div>
+                <p className="text-xl font-bold text-foreground leading-tight">
+                  {c.quantidade}
+                  <span className="text-xs font-medium text-muted-foreground ml-1">
+                    {c.quantidade === 1 ? 'produto' : 'produtos'}
+                  </span>
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {c.participacao.toFixed(1)}% · {formatarValor(c.valor)}
+                </p>
+
+                <div className="mt-2.5 pt-2.5 border-t border-border">
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">
+                    Estratégia sugerida
+                  </label>
+                  <select
+                    value={mapaEfetivo[c.classe] ?? ''}
+                    onChange={e => {
+                      setTocado(true);
+                      setMapa({ ...mapaEfetivo, [c.classe]: e.target.value || null });
+                    }}
+                    className="w-full px-2 py-1.5 border border-border rounded bg-background text-xs focus:ring-2 focus:ring-primary/50"
+                  >
+                    <option value="">Não mexer</option>
+                    {estrategias.map(e => (
+                      <option key={e.id} value={e.id}>{e.nome} · {e.margem}%</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {simulacao && (
+            <div className={`p-3 rounded-xl border ${deltaLucro < 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+              <p className="text-xs font-semibold text-foreground mb-2">Se aplicar, o mix fica assim</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] text-muted-foreground">Receita projetada</p>
+                  <p className="text-sm font-bold text-foreground">
+                    {formatCurrency(receitaAtual)} <span className="text-muted-foreground font-normal">→</span> {formatCurrency(simulacao.receitaTotal)}
+                  </p>
+                  <p className={`text-[11px] font-medium ${deltaReceita < 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                    {deltaReceita >= 0 ? '+' : ''}{formatCurrency(deltaReceita)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground">Resultado do mix</p>
+                  <p className="text-sm font-bold text-foreground">
+                    {formatCurrency(lucroAtual)} <span className="text-muted-foreground font-normal">→</span> {formatCurrency(simulacao.lucroLiquidoTotal)}
+                  </p>
+                  <p className={`text-[11px] font-medium ${deltaLucro < 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                    {deltaLucro >= 0 ? '+' : ''}{formatCurrency(deltaLucro)}
+                    {lucroAtual !== 0 && ` (${deltaLucroPercent >= 0 ? '+' : ''}${deltaLucroPercent.toFixed(0)}%)`}
+                  </p>
+                </div>
+              </div>
+              {deltaLucro < 0 && (
+                <p className="text-[11px] text-amber-800 mt-2 leading-relaxed">
+                  O resultado cai porque os produtos que mais vendem passam a ter margem menor. É o
+                  efeito esperado de um preço de atração — ele se paga em volume, que esta projeção
+                  ainda não prevê. Se a queda parecer grande demais, suba a margem da faixa da classe A
+                  ou mande só parte dos produtos para ela.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
+            <button
+              type="button"
+              disabled={mudariam === 0}
+              onClick={() => {
+                if (!confirmando) {
+                  setConfirmando(true);
+                  window.setTimeout(() => setConfirmando(false), 3500);
+                  return;
+                }
+                setConfirmando(false);
+                onAplicar(mapaEfetivo);
+              }}
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                confirmando ? 'bg-amber-500 text-white' : 'bg-primary text-primary-foreground hover:bg-primary/90'
+              }`}
+            >
+              {confirmando ? 'Confirmar?' : 'Aplicar estratégias por classe'}
+            </button>
+            <span className="text-[11px] text-muted-foreground">
+              {mudariam === 0
+                ? 'Nenhum produto mudaria de estratégia com este mapeamento.'
+                : `${mudariam} ${mudariam === 1 ? 'produto muda' : 'produtos mudam'} de estratégia. Os preços são recalculados na hora — dá para desfazer trocando a faixa de volta.`}
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
