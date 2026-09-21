@@ -22,6 +22,7 @@ import { ErroNotaFiscal, direcaoDaNota, lerNotaFiscal, normalizarDescricao, some
 import { sugerirVinculos } from "./src/domain/fiscal/sugestoes.js";
 import AdmZip from "adm-zip";
 import { aplicarVinculos, resumirPorProdutoPeriodo, type ItemComContexto } from "./src/domain/fiscal/agregacao.js";
+import { estimarElasticidade } from "./src/domain/elasticidade/index.js";
 
 dotenv.config();
 
@@ -1711,10 +1712,25 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
   const jaResolvidas = new Set<string>([...decididas, ...conversoesPendentes.keys()]);
   const sugestoesNovas = sugerirVinculos(produtos, { jaResolvidas });
 
+  // Elasticidade-preço de cada produto, do próprio histórico. A série é a mesma
+  // que a tela já mostra: um ponto por competência com venda. Em boa parte dos
+  // casos a resposta é "não dá para dizer", e é ela que vai para a tela — um
+  // coeficiente mal estimado é pior que nenhum, porque parece preciso.
+  const produtosComElasticidade = produtos.map(p => ({
+    ...p,
+    elasticidade: estimarElasticidade(
+      p.periodos.map(per => ({
+        competencia: per.competencia,
+        preco: per.precoMedio,
+        quantidade: per.quantidadeVendida,
+      }))
+    ),
+  }));
+
   const competencias = [...new Set(linhas.map((l: any) => l.competencia))].sort();
   res.json({
     competencias,
-    produtos,
+    produtos: produtosComElasticidade,
     vinculos: vinculos.map((v: any) => ({
       id: v.id,
       chaveOrigem: v.chaveOrigem,

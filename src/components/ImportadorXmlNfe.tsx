@@ -14,6 +14,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import PainelElasticidade from './PainelElasticidade';
 import { formatCurrency } from '../utils/format';
 import { sugerirCadastro } from '../domain/fiscal/agregacao';
 import type { ResumoProduto } from '../domain/fiscal/tipos';
@@ -945,6 +946,8 @@ export default function ImportadorXmlNfe() {
                                       <span className="font-normal text-muted-foreground"> · códigos nas notas: {p.codigos.join(', ')}</span>
                                     )}
                                   </p>
+                                  <PainelElasticidade elasticidade={(p as any).elasticidade} />
+
                                   <table className="w-full text-xs">
                                     <thead className="text-muted-foreground">
                                       <tr className="border-b border-border">
