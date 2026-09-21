@@ -271,6 +271,43 @@ describe('Vínculo manual entre fardo e unidade', () => {
     expect(convertido.item.quantidade).toBe(20);
   });
 
+  it('junta dois produtos de mesma unidade com fator 1', () => {
+    // O caso mais comum de vínculo manual, e o que estava quebrado: o
+    // fornecedor chama de "REFRIG LATA 350ML" o que a empresa vende como
+    // "Refrigerante Cola Lata". Mesma unidade, fator 1. Antes, `aplicarVinculos`
+    // saía sem converter porque o fator era 1, e o vínculo aparecia confirmado
+    // na tela enquanto o produto continuava partido em dois — um com custo e
+    // sem preço, outro com preço e sem custo.
+    const compra = ctx('2026-06', 'compra', item({
+      quantidade: 100, valorLiquido: 300, valorProduto: 300, ean: '',
+      descricao: 'REFRIG LATA 350ML', chaveProduto: 'REFRIG LATA 350ML', origemChave: 'descricao',
+    }));
+
+    const semVinculo = resumirPorProdutoPeriodo([compra, vendaUnidade]);
+    expect(semVinculo).toHaveLength(2);
+
+    const comVinculo = resumirPorProdutoPeriodo(aplicarVinculos([compra, vendaUnidade], [
+      { chaveOrigem: 'REFRIG LATA 350ML', chaveDestino: '7891000100103', fator: 1 },
+    ]));
+    expect(comVinculo).toHaveLength(1);
+    expect(comVinculo[0].custoMaisRecente).toBeCloseTo(3, 6);
+    expect(comVinculo[0].precoMaisRecente).toBeCloseTo(9, 6);
+    expect(comVinculo[0].periodos[0].margemBrutaPercent).not.toBeNull();
+  });
+
+  it('com fator 1, a quantidade e o valor pago não mudam', () => {
+    const compra = ctx('2026-06', 'compra', item({
+      quantidade: 40, valorLiquido: 200, valorProduto: 200, ean: '',
+      descricao: 'MESMO ITEM OUTRO NOME', chaveProduto: 'MESMO ITEM OUTRO NOME', origemChave: 'descricao',
+    }));
+    const [convertido] = aplicarVinculos([compra], [
+      { chaveOrigem: 'MESMO ITEM OUTRO NOME', chaveDestino: '7891000100103', fator: 1 },
+    ]);
+    expect(convertido.item.chaveProduto).toBe('7891000100103');
+    expect(convertido.item.quantidade).toBe(40);
+    expect(convertido.item.quantidade * convertido.item.valorUnitarioLiquido).toBeCloseTo(200, 6);
+  });
+
   it('ignora vínculos inválidos', () => {
     const iguais = aplicarVinculos([compraFardo], [
       { chaveOrigem: 'FARDO REFRI C 12', chaveDestino: 'FARDO REFRI C 12', fator: 12 },

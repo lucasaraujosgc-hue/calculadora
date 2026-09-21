@@ -82,7 +82,13 @@ export function aplicarVinculos(
 
   return itens.map(entrada => {
     const { chave, fator } = resolver(entrada.item.chaveProduto);
-    if (chave === entrada.item.chaveProduto || fator === 1) return entrada;
+    // Só o destino decide se há o que fazer. O fator 1 é um vínculo legítimo e
+    // dos mais comuns: o fornecedor chama de "REFRIG LATA 350ML" o que a
+    // empresa vende como "Refri Lata", mesma unidade. Antes, esse caso saía
+    // daqui sem conversão nenhuma — o vínculo aparecia confirmado na tela e o
+    // produto continuava partido em dois, um com custo e sem preço, outro com
+    // preço e sem custo.
+    if (chave === entrada.item.chaveProduto) return entrada;
 
     const quantidade = entrada.item.quantidade * fator;
     return {
