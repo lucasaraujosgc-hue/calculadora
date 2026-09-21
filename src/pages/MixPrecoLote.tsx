@@ -37,6 +37,7 @@ import DespesasVariaveisManager from '../components/DespesasVariaveisManager';
 import EstrategiasManager, { SeletorEstrategia, SeloEstrategia } from '../components/Estrategias';
 import CurvaABC, { SeloClasseABC } from '../components/CurvaABC';
 import { classificarABC, type CriterioABC, type MapeamentoABC } from '../domain/abc';
+import type { ItemEquilibrio } from '../domain/elasticidade/equilibrio';
 
 type SortKey =
   | 'nome' | 'cmv' | 'vendas' | 'rateio' | 'imposto' | 'taxaCartao'
@@ -251,6 +252,27 @@ export default function MixPrecoLote() {
       return destino ? { ...p, estrategiaId: destino } : p;
     });
     return calcularMix(hipotetico, custoFixoTotal, despesasVariaveis, estrategias);
+  };
+
+  /**
+   * Itens para a conta de equilíbrio: preço de hoje contra preço proposto.
+   *
+   * Não depende de histórico nenhum — sai de preço, CMV e deduções, que o
+   * sistema tem de todo produto. É o que permite dar um veredito sobre o corte
+   * mesmo para quem nunca importou uma nota.
+   */
+  const itensParaEquilibrio = (mapa: MapeamentoABC): ItemEquilibrio[] => {
+    const depois = simularPorClasse(mapa);
+    return mix.produtos.map(atual => {
+      const novo = depois.produtos.find(x => x.id === atual.id);
+      return {
+        precoAtual: atual.preco,
+        precoNovo: novo ? novo.preco : atual.preco,
+        cmv: atual.cmv,
+        deducoesPercent: atual.deducoesPercent,
+        quantidade: atual.vendasProjetadas || 0,
+      };
+    });
   };
 
   /** Põe cada produto na faixa escolhida para a classe dele. */
@@ -809,6 +831,7 @@ export default function MixPrecoLote() {
               setCriterio={setCriterioABC}
               onAplicar={aplicarEstrategiasPorClasse}
               onSimular={simularPorClasse}
+              onItensEquilibrio={itensParaEquilibrio}
               receitaAtual={receitaTotal}
               lucroAtual={lucroMix}
             />

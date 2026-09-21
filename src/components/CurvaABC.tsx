@@ -11,6 +11,12 @@ import {
   type ResultadoABC,
 } from '../domain/abc';
 import type { ResultadoMix } from '../domain/pricing';
+import {
+  elasticidadeDeEquilibrioDoMix,
+  vereditoDoCorte,
+  ELASTICIDADE_REFERENCIA_VAREJO,
+  type ItemEquilibrio,
+} from '../domain/elasticidade/equilibrio';
 import { useAppContext } from '../context/AppContext';
 import { formatCurrency } from '../utils/format';
 
@@ -59,6 +65,7 @@ export default function CurvaABC({
   setCriterio,
   onAplicar,
   onSimular,
+  onItensEquilibrio,
   receitaAtual,
   lucroAtual,
 }: {
@@ -68,6 +75,8 @@ export default function CurvaABC({
   onAplicar: (mapa: MapeamentoABC) => void;
   /** Roda o mix como ficaria com este mapeamento, sem aplicar. */
   onSimular: (mapa: MapeamentoABC) => ResultadoMix<any>;
+  /** Preço de hoje contra o proposto, para a conta de equilíbrio. */
+  onItensEquilibrio: (mapa: MapeamentoABC) => ItemEquilibrio[];
   receitaAtual: number;
   lucroAtual: number;
 }) {
@@ -104,6 +113,14 @@ export default function CurvaABC({
     ? (deltaLucro / Math.abs(lucroAtual)) * 100
     : 0;
   const deltaReceita = simulacao ? simulacao.receitaTotal - receitaAtual : 0;
+
+  // Quanto o volume teria que reagir para o corte se pagar sozinho. Sai de
+  // preço, custo e deduções — não de histórico —, então vale para todo mundo.
+  const equilibrio = useMemo(
+    () => (mudariam > 0 ? elasticidadeDeEquilibrioDoMix(onItensEquilibrio(mapaEfetivo)) : null),
+    [mudariam, mapaEfetivo, onItensEquilibrio]
+  );
+  const veredito = equilibrio ? vereditoDoCorte(equilibrio) : 'nao-se-aplica';
 
   const semDados = abc.total <= 0;
   const criterioAtual = CRITERIOS.find(c => c.id === criterio)!;
@@ -206,6 +223,38 @@ export default function CurvaABC({
             ))}
           </div>
 
+          {equilibrio && equilibrio.elasticidade !== null && veredito !== 'nao-se-aplica' && (
+            <div className={`p-3 rounded-xl border ${veredito === 'improvavel' ? 'bg-amber-50 border-amber-300' : 'bg-emerald-50 border-emerald-200'}`}>
+              <p className="text-xs font-bold text-foreground">
+                {veredito === 'improvavel'
+                  ? 'Este desconto não se paga no volume destes produtos'
+                  : 'Este desconto pode se pagar em volume'}
+              </p>
+              <p className="text-xs mt-1.5 leading-relaxed">
+                Para empatar, o volume teria que reagir com elasticidade{' '}
+                <strong>{equilibrio.elasticidade.toFixed(1)}</strong> — ou seja, subir{' '}
+                <strong>{equilibrio.aumentoVolumeNecessarioPercent?.toFixed(0)}%</strong>.
+                {veredito === 'improvavel'
+                  ? ` No varejo, mesmo os itens mais sensíveis a preço raramente passam de ${ELASTICIDADE_REFERENCIA_VAREJO.toFixed(0)}.`
+                  : ' Está dentro do que itens sensíveis a preço costumam entregar.'}
+              </p>
+              <p className="text-[11px] mt-2 leading-relaxed text-muted-foreground">
+                O preço cai {Math.abs(equilibrio.variacaoPrecoPercent).toFixed(0)}%, mas a margem que
+                sobra para pagar as contas cai{' '}
+                {Math.abs(equilibrio.variacaoMargemContribuicaoPercent).toFixed(0)}% — o custo não
+                acompanha o desconto. É por isso que a conta é mais dura do que parece, e o que manda
+                é o nível da sua margem, não o tamanho do corte.
+              </p>
+              {veredito === 'improvavel' && (
+                <p className="text-[11px] mt-2 leading-relaxed text-amber-900">
+                  Isso não quer dizer que o preço de atração seja errado — quer dizer que ele não se
+                  paga <em>neste item</em>. Quem paga um produto de atração é a cesta que o cliente
+                  leva junto, e isso nenhuma conta aqui mede. Decida sabendo disso.
+                </p>
+              )}
+            </div>
+          )}
+
           {simulacao && (
             <div className={`p-3 rounded-xl border ${deltaLucro < 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
               <p className="text-xs font-semibold text-foreground mb-2">Se aplicar, o mix fica assim</p>
@@ -232,10 +281,10 @@ export default function CurvaABC({
               </div>
               {deltaLucro < 0 && (
                 <p className="text-[11px] text-amber-800 mt-2 leading-relaxed">
-                  O resultado cai porque os produtos que mais vendem passam a ter margem menor. É o
-                  efeito esperado de um preço de atração — ele se paga em volume, que esta projeção
-                  ainda não prevê. Se a queda parecer grande demais, suba a margem da faixa da classe A
-                  ou mande só parte dos produtos para ela.
+                  Esta projeção considera o volume parado. O volume de fato reage ao preço — mas,
+                  como a conta acima mostra, quase nunca o suficiente para repor a margem perdida.
+                  Se a queda parecer grande demais, suba a margem da faixa da classe A ou mande só
+                  parte dos produtos para ela.
                 </p>
               )}
             </div>
