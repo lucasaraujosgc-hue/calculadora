@@ -29,6 +29,18 @@ export type DespesaVariavelItem = {
   posicao?: number;
 };
 
+/**
+ * Uma faixa de margem nomeada — "Atração", "Padrão", "Margem alta".
+ * Cada usuário tem as suas; toda conta nasce com três, editáveis.
+ */
+export type EstrategiaItem = {
+  id: string;
+  nome: string;
+  margem: number;
+  cor?: string;
+  posicao?: number;
+};
+
 export type ProdutoItem = {
   id: string;
   nome: string;
@@ -45,6 +57,8 @@ export type ProdutoItem = {
   precoVenda?: number;
   /** Percentual de cada despesa variável personalizada, por id da despesa. */
   despesasVariaveis?: Record<string, number>;
+  /** Faixa de margem que o produto segue; null = Personalizado. */
+  estrategiaId?: string | null;
 };
 
 export type SnapshotItem = {
@@ -79,6 +93,11 @@ type AppContextType = {
   addDespesaVariavel: (nome: string) => Promise<void>;
   renameDespesaVariavel: (id: string, nome: string) => Promise<void>;
   removeDespesaVariavel: (id: string) => Promise<void>;
+
+  estrategias: EstrategiaItem[];
+  addEstrategia: (nome: string, margem: number) => Promise<void>;
+  updateEstrategia: (id: string, patch: { nome?: string; margem?: number }) => Promise<void>;
+  removeEstrategia: (id: string) => Promise<void>;
   snapshots: SnapshotItem[];
   fetchSnapshots: () => Promise<void>;
   createSnapshot: () => Promise<void>;
@@ -137,6 +156,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem('vc_despesas_variaveis') || sessionStorage.getItem('vc_despesas_variaveis');
     return saved ? JSON.parse(saved) : [];
   });
+
+  // As três faixas com que toda conta começa — as mesmas que o servidor semeia
+  // no primeiro acesso, repetidas aqui para o modo visitante nascer igual.
+  const estrategiasPadrao: EstrategiaItem[] = [
+    { id: 'estrategia-atracao', nome: 'Atração', margem: 10, cor: 'sky', posicao: 0 },
+    { id: 'estrategia-padrao', nome: 'Padrão', margem: 20, cor: 'slate', posicao: 1 },
+    { id: 'estrategia-alta', nome: 'Margem alta', margem: 30, cor: 'emerald', posicao: 2 },
+  ];
+
+  const [estrategias, setEstrategias] = useState<EstrategiaItem[]>(() => {
+    const saved = localStorage.getItem('vc_estrategias') || sessionStorage.getItem('vc_estrategias');
+    const parsed = saved ? JSON.parse(saved) : null;
+    return parsed && parsed.length > 0 ? parsed : estrategiasPadrao;
+  });
   const [produtos, setProdutos] = useState<ProdutoItem[]>(() => {
     const saved = localStorage.getItem('vc_produtos') || sessionStorage.getItem('vc_produtos');
     const parsed = saved ? JSON.parse(saved) : null;
@@ -170,11 +203,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       Promise.all([
         fetch('/api/fixed-costs').then(res => res.json()),
         fetch('/api/products').then(res => res.json()),
-        fetch('/api/variable-expenses').then(res => res.json())
-      ]).then(([custos, prods, despesas]) => {
+        fetch('/api/variable-expenses').then(res => res.json()),
+        fetch('/api/pricing-strategies').then(res => res.json())
+      ]).then(([custos, prods, despesas, estrats]) => {
         if (Array.isArray(custos)) setCustosFixos(custos);
         if (Array.isArray(prods)) setProdutos(prods);
         if (Array.isArray(despesas)) setDespesasVariaveis(despesas);
+        if (Array.isArray(estrats) && estrats.length > 0) setEstrategias(estrats);
       }).catch(err => {
         console.error("Error loading data from API", err);
       });
@@ -214,8 +249,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       storage.setItem('vc_custos', JSON.stringify(custosFixos));
       storage.setItem('vc_produtos', JSON.stringify(produtos));
       storage.setItem('vc_despesas_variaveis', JSON.stringify(despesasVariaveis));
+      storage.setItem('vc_estrategias', JSON.stringify(estrategias));
     }
-  }, [custosFixos, produtos, despesasVariaveis, user, isGuest]);
+  }, [custosFixos, produtos, despesasVariaveis, estrategias, user, isGuest]);
 
   const login = (u: User, remember: boolean) => {
     setUser(u);
@@ -258,6 +294,86 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   
+  // --- Estratégias de margem -----------------------------------------------
+
+  const MAX_ESTRATEGIAS = 8;
+
+  const addEstrategia = async (nomeBruto: string, margem: number) => {
+    const nome = nomeBruto.trim().replace(/\s+/g, ' ');
+    if (!nome) throw new Error('Dê um nome para a estratégia.');
+    if (!Number.isFinite(margem) || margem < 0 || margem >= 100) {
+      throw new Error('A margem precisa ficar entre 0% e 99%.');
+    }
+    if (estrategias.some(e => e.nome.toLowerCase() === nome.toLowerCase())) {
+      throw new Error(`Você já tem uma estratégia chamada "${nome}".`);
+    }
+    if (estrategias.length >= MAX_ESTRATEGIAS) {
+      throw new Error(`Você já tem ${MAX_ESTRATEGIAS} estratégias. Remova alguma para criar outra.`);
+    }
+
+    if (user && !isGuest) {
+      const res = await fetch('/api/pricing-strategies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome, margem })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao criar a estratégia');
+      setEstrategias(prev => [...prev, data.estrategia]);
+    } else {
+      setEstrategias(prev => [
+        ...prev,
+        { id: crypto.randomUUID(), nome, margem, cor: 'slate', posicao: prev.length }
+      ]);
+    }
+  };
+
+  const updateEstrategia = async (id: string, patch: { nome?: string; margem?: number }) => {
+    const nome = patch.nome !== undefined ? patch.nome.trim().replace(/\s+/g, ' ') : undefined;
+    if (nome !== undefined && !nome) throw new Error('Dê um nome para a estratégia.');
+    if (nome !== undefined && estrategias.some(e => e.id !== id && e.nome.toLowerCase() === nome.toLowerCase())) {
+      throw new Error(`Você já tem uma estratégia chamada "${nome}".`);
+    }
+    if (patch.margem !== undefined && (!Number.isFinite(patch.margem) || patch.margem < 0 || patch.margem >= 100)) {
+      throw new Error('A margem precisa ficar entre 0% e 99%.');
+    }
+
+    if (user && !isGuest) {
+      const res = await fetch(`/api/pricing-strategies/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...patch, nome })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao salvar a estratégia');
+    }
+    setEstrategias(prev => prev.map(e => (e.id === id ? {
+      ...e,
+      ...(nome !== undefined ? { nome } : {}),
+      ...(patch.margem !== undefined ? { margem: patch.margem } : {}),
+    } : e)));
+  };
+
+  const removeEstrategia = async (id: string) => {
+    const alvo = estrategias.find(e => e.id === id);
+    if (!alvo) return;
+
+    if (user && !isGuest) {
+      const res = await fetch(`/api/pricing-strategies/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Erro ao excluir a estratégia');
+      }
+    }
+
+    // Quem seguia a faixa vira Personalizado com a margem que ela tinha, para o
+    // preço não mudar no momento da exclusão. O servidor faz o mesmo no banco.
+    setProdutos(prev => prev.map(p => (
+      p.estrategiaId === id ? { ...p, estrategiaId: null, margem: alvo.margem } : p
+    )));
+    setEstrategias(prev => prev.filter(e => e.id !== id));
+  };
+
   const fetchSnapshots = async () => {
     if (user && !isGuest) {
       try {
@@ -504,6 +620,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       saveProduto, removeProduto, syncProdutos,
       saveCustoFixo, removeCustoFixo,
       despesasVariaveis, addDespesaVariavel, renameDespesaVariavel, removeDespesaVariavel,
+      estrategias, addEstrategia, updateEstrategia, removeEstrategia,
       snapshots, fetchSnapshots, createSnapshot
     }}>
       {children}

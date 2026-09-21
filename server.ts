@@ -12,7 +12,7 @@ import crypto from "crypto";
 import { db } from "./src/db/index.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots, store,
-  fiscalDocuments, fiscalItems, fiscalProductLinks, variableExpenses } from "./src/db/schema.js";
+  fiscalDocuments, fiscalItems, fiscalProductLinks, variableExpenses, pricingStrategies } from "./src/db/schema.js";
 import { eq, and, gte, lte, desc, asc, inArray } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -601,6 +601,161 @@ app.put("/api/me", requireUser, async (req: any, res) => {
 // a lista de um usuário é invisível — e inalterável — para qualquer outro. Um
 // id de despesa de outra conta simplesmente não encontra linha para atualizar.
 
+// ---------------------------------------------------------------------------
+// Estratégias de margem
+// ---------------------------------------------------------------------------
+//
+// Poucas faixas nomeadas no lugar de uma margem solta por produto. O lojista
+// não precisa decidir "que margem leva o parafuso" trezentas vezes; decide uma
+// vez o que é produto de atração e o que é produto de margem, e ajusta a
+// política mexendo na faixa.
+//
+// Como as despesas variáveis, tudo aqui é filtrado por `userId`.
+
+const NOME_ESTRATEGIA_MAX = 30;
+const MAX_ESTRATEGIAS = 8;
+
+/**
+ * As faixas com que toda conta começa. São um ponto de partida editável, não
+ * uma regra: o usuário renomeia, muda os percentuais, cria e apaga.
+ */
+const ESTRATEGIAS_PADRAO = [
+  { name: "Atração", margem: 10, cor: "sky" },
+  { name: "Padrão", margem: 20, cor: "slate" },
+  { name: "Margem alta", margem: 30, cor: "emerald" },
+];
+
+function mapearEstrategia(e: typeof pricingStrategies.$inferSelect) {
+  return { id: e.id, nome: e.name, margem: e.margem, cor: e.cor, posicao: e.position };
+}
+
+/**
+ * Lê as faixas do usuário, criando as três padrão na primeira vez.
+ *
+ * Semear na leitura (e não no cadastro) faz as contas que já existiam antes
+ * desta funcionalidade ganharem as faixas sem precisar de migração de dados.
+ * Uma corrida entre duas abas cai no índice único (userId, name) — daí o
+ * catch, que simplesmente relê o que a outra aba criou.
+ */
+async function estrategiasDoUsuario(userId: string) {
+  const existentes = await db.select().from(pricingStrategies)
+    .where(eq(pricingStrategies.userId, userId))
+    .orderBy(asc(pricingStrategies.position), asc(pricingStrategies.createdAt));
+  if (existentes.length > 0) return existentes;
+
+  try {
+    await db.insert(pricingStrategies).values(
+      ESTRATEGIAS_PADRAO.map((e, i) => ({ userId, name: e.name, margem: e.margem, cor: e.cor, position: i }))
+    );
+  } catch {
+    // Outra requisição semeou primeiro; a releitura abaixo resolve.
+  }
+
+  return db.select().from(pricingStrategies)
+    .where(eq(pricingStrategies.userId, userId))
+    .orderBy(asc(pricingStrategies.position), asc(pricingStrategies.createdAt));
+}
+
+function nomeEstrategiaValido(valor: unknown): string | null {
+  if (typeof valor !== "string") return null;
+  const nome = valor.trim().replace(/\s+/g, " ");
+  if (!nome || nome.length > NOME_ESTRATEGIA_MAX) return null;
+  return nome;
+}
+
+/** Margem alvo aceita: de 0 a 99%. Em 100% o preço não fecha (divisão por zero). */
+function margemValida(valor: unknown): number | null {
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n < 0 || n >= 100) return null;
+  return n;
+}
+
+app.get("/api/pricing-strategies", requireUser, async (req: any, res) => {
+  const lista = await estrategiasDoUsuario(req.currentUser.id);
+  res.json(lista.map(mapearEstrategia));
+});
+
+app.post("/api/pricing-strategies", requireUser, async (req: any, res) => {
+  const nome = nomeEstrategiaValido(req.body?.nome ?? req.body?.name);
+  if (!nome) return res.status(400).json({ error: `Informe um nome de até ${NOME_ESTRATEGIA_MAX} caracteres.` });
+
+  const margem = margemValida(req.body?.margem);
+  if (margem === null) return res.status(400).json({ error: "A margem precisa ficar entre 0% e 99%." });
+
+  const existentes = await estrategiasDoUsuario(req.currentUser.id);
+  if (existentes.length >= MAX_ESTRATEGIAS) {
+    return res.status(400).json({ error: `Você já tem ${MAX_ESTRATEGIAS} estratégias. Remova alguma para criar outra.` });
+  }
+  if (existentes.some(e => e.name.toLowerCase() === nome.toLowerCase())) {
+    return res.status(409).json({ error: `Você já tem uma estratégia chamada "${nome}".` });
+  }
+
+  const [criada] = await db.insert(pricingStrategies).values({
+    userId: req.currentUser.id,
+    name: nome,
+    margem,
+    cor: typeof req.body?.cor === "string" ? req.body.cor : "slate",
+    position: existentes.length,
+  }).returning();
+
+  res.json({ success: true, estrategia: mapearEstrategia(criada) });
+});
+
+app.put("/api/pricing-strategies/:id", requireUser, async (req: any, res) => {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+
+  if (req.body?.nome !== undefined || req.body?.name !== undefined) {
+    const nome = nomeEstrategiaValido(req.body?.nome ?? req.body?.name);
+    if (!nome) return res.status(400).json({ error: `Informe um nome de até ${NOME_ESTRATEGIA_MAX} caracteres.` });
+    const outras = await estrategiasDoUsuario(req.currentUser.id);
+    if (outras.some(e => e.id !== req.params.id && e.name.toLowerCase() === nome.toLowerCase())) {
+      return res.status(409).json({ error: `Você já tem uma estratégia chamada "${nome}".` });
+    }
+    patch.name = nome;
+  }
+
+  if (req.body?.margem !== undefined) {
+    const margem = margemValida(req.body.margem);
+    if (margem === null) return res.status(400).json({ error: "A margem precisa ficar entre 0% e 99%." });
+    patch.margem = margem;
+  }
+
+  if (typeof req.body?.cor === "string") patch.cor = req.body.cor;
+
+  const atualizada = await db.update(pricingStrategies).set(patch)
+    .where(and(
+      eq(pricingStrategies.id, req.params.id as any),
+      eq(pricingStrategies.userId, req.currentUser.id),
+    )).returning();
+
+  if (atualizada.length === 0) return res.status(404).json({ error: "Estratégia não encontrada" });
+  res.json({ success: true, estrategia: mapearEstrategia(atualizada[0]) });
+});
+
+app.delete("/api/pricing-strategies/:id", requireUser, async (req: any, res) => {
+  const userId = req.currentUser.id;
+
+  const removida = await db.transaction(async (tx: any) => {
+    const alvo = await tx.select().from(pricingStrategies)
+      .where(and(eq(pricingStrategies.id, req.params.id as any), eq(pricingStrategies.userId, userId)));
+    if (alvo.length === 0) return null;
+
+    // Os produtos que seguiam esta faixa viram "Personalizado" com a margem que
+    // a faixa tinha — o preço deles não muda no momento da exclusão, que é o
+    // que evita um susto de reprecificação em massa por um clique.
+    await tx.update(products)
+      .set({ estrategiaId: null, margem: alvo[0].margem, updatedAt: new Date() })
+      .where(and(eq(products.userId, userId), eq(products.estrategiaId, req.params.id as any)));
+
+    await tx.delete(pricingStrategies)
+      .where(and(eq(pricingStrategies.id, req.params.id as any), eq(pricingStrategies.userId, userId)));
+    return alvo[0];
+  });
+
+  if (!removida) return res.status(404).json({ error: "Estratégia não encontrada" });
+  res.json({ success: true });
+});
+
 const NOME_DESPESA_MAX = 40;
 
 function nomeDespesaValido(valor: unknown): string | null {
@@ -829,6 +984,7 @@ function mapearProduto(p: typeof products.$inferSelect) {
     percentualRateio: p.percentualRateio || 0,
     modoPrecificacao: p.modoPrecificacao || 'margem',
     despesasVariaveis: (p.despesasVariaveis as Record<string, number>) || {},
+    estrategiaId: p.estrategiaId ?? null,
     isSample: p.isSample,
   };
 }
@@ -861,6 +1017,9 @@ function camposDoProduto(body: any) {
     despesasVariaveis: (despesas && typeof despesas === 'object' && !Array.isArray(despesas))
       ? despesas as Record<string, number>
       : {},
+    // String vazia vira null: é o que a tela manda quando o usuário escolhe
+    // "Personalizado" no seletor de estratégia.
+    estrategiaId: typeof body.estrategiaId === 'string' && body.estrategiaId ? body.estrategiaId : null,
   };
 }
 

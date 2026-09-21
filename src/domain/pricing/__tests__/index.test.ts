@@ -4,12 +4,19 @@ import {
   calcularProduto,
   calcularMix,
   somarDespesasPersonalizadas,
+  resolverMargem,
   type DespesaVariavelDef,
+  type EstrategiaDef,
   type ProdutoCalculo,
 } from '../index';
 
 const FRETE: DespesaVariavelDef = { id: 'd1', nome: 'Frete' };
 const EMBALAGEM: DespesaVariavelDef = { id: 'd2', nome: 'Embalagem' };
+
+const ATRACAO: EstrategiaDef = { id: 'e1', nome: 'Atração', margem: 10 };
+const PADRAO: EstrategiaDef = { id: 'e2', nome: 'Padrão', margem: 20 };
+const ALTA: EstrategiaDef = { id: 'e3', nome: 'Margem alta', margem: 30 };
+const ESTRATEGIAS = [ATRACAO, PADRAO, ALTA];
 
 describe('calculateSellingPrice', () => {
   it('embute a margem como fração do preço, não como markup sobre o custo', () => {
@@ -191,5 +198,88 @@ describe('calcularMix', () => {
     expect(comFrete.produtos[0].preco).toBeGreaterThan(semFrete.produtos[0].preco);
     expect(comFrete.despesasValorTotal).toBeGreaterThan(0);
     expect(semFrete.despesasValorTotal).toBe(0);
+  });
+});
+
+describe('resolverMargem', () => {
+  it('usa a margem da estratégia quando o produto segue uma', () => {
+    const r = resolverMargem({ margem: 99, estrategiaId: 'e1' }, ESTRATEGIAS);
+    expect(r.margem).toBe(10);
+    expect(r.estrategia?.nome).toBe('Atração');
+  });
+
+  it('usa a margem do próprio produto quando é Personalizado', () => {
+    const r = resolverMargem({ margem: 37, estrategiaId: null }, ESTRATEGIAS);
+    expect(r.margem).toBe(37);
+    expect(r.estrategia).toBeNull();
+  });
+
+  it('cai para a margem do produto quando a estratégia foi apagada', () => {
+    // Apagar uma faixa não pode zerar o preço de quem a seguia: o produto volta
+    // a valer pela própria margem, que é o último valor conhecido dele.
+    const r = resolverMargem({ margem: 22, estrategiaId: 'sumiu' }, ESTRATEGIAS);
+    expect(r.margem).toBe(22);
+    expect(r.estrategia).toBeNull();
+  });
+
+  it('trata produto sem margem nem estratégia como zero', () => {
+    expect(resolverMargem({}, ESTRATEGIAS).margem).toBe(0);
+  });
+});
+
+describe('estratégias de margem no cálculo', () => {
+  const produto: ProdutoCalculo = {
+    id: 'p1', cmv: 50, vendasProjetadas: 100, percentualRateio: 100,
+    imposto: 8, taxaCartao: 5, comissao: 2, margem: 99,
+  };
+
+  it('o preço segue a estratégia, não a margem gravada no produto', () => {
+    const comEstrategia = calcularProduto({ ...produto, estrategiaId: 'e2' }, 1000, [], ESTRATEGIAS);
+    const equivalente = calcularProduto({ ...produto, margem: 20 }, 1000);
+    expect(comEstrategia.preco).toBeCloseTo(equivalente.preco, 6);
+    expect(comEstrategia.margemAlvo).toBe(20);
+    expect(comEstrategia.estrategia?.nome).toBe('Padrão');
+  });
+
+  it('mudar a margem da faixa muda o preço de todos os produtos dela', () => {
+    const mix = (margemPadrao: number) => calcularMix(
+      [
+        { id: 'a', cmv: 10, vendasProjetadas: 100, percentualRateio: 50, estrategiaId: 'e2' },
+        { id: 'b', cmv: 20, vendasProjetadas: 100, percentualRateio: 50, estrategiaId: 'e2' },
+      ],
+      1000, [],
+      [{ ...PADRAO, margem: margemPadrao }]
+    );
+    const antes = mix(20);
+    const depois = mix(35);
+    expect(depois.produtos[0].preco).toBeGreaterThan(antes.produtos[0].preco);
+    expect(depois.produtos[1].preco).toBeGreaterThan(antes.produtos[1].preco);
+    expect(depois.produtos.every(p => p.margemAlvo === 35)).toBe(true);
+  });
+
+  it('produtos de faixas diferentes recebem multiplicadores diferentes', () => {
+    // O contrário da margem uniforme: mesmo custo, preços diferentes porque o
+    // papel de cada item no mix é diferente.
+    const mix = calcularMix(
+      [
+        { id: 'isca', cmv: 30, vendasProjetadas: 100, percentualRateio: 50, estrategiaId: 'e1' },
+        { id: 'gordo', cmv: 30, vendasProjetadas: 100, percentualRateio: 50, estrategiaId: 'e3' },
+      ],
+      0, [], ESTRATEGIAS
+    );
+    const [isca, gordo] = mix.produtos;
+    expect(isca.preco).toBeLessThan(gordo.preco);
+    expect(isca.estrategia?.nome).toBe('Atração');
+    expect(gordo.estrategia?.nome).toBe('Margem alta');
+  });
+
+  it('preço fixo continua ignorando a estratégia e reportando a margem real', () => {
+    const r = calcularProduto(
+      { ...produto, estrategiaId: 'e3', modoPrecificacao: 'preco', precoFixo: 100 },
+      0, [], ESTRATEGIAS
+    );
+    expect(r.preco).toBe(100);
+    expect(r.margemAlvo).toBe(30);       // a faixa que ele segue
+    expect(r.margemReal).toBeCloseTo(35, 6); // 100 - 50 - 15% de 100 = 35
   });
 });

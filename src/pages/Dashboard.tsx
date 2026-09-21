@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Tooltip as RechartsTooltip, ResponsiveContainer, Legend, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Percent, Target, Box, FileText, Info, Edit2, Check, X, AlertTriangle } from 'lucide-react';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
-import { calcularMix, type DespesaVariavelDef } from '../domain/pricing';
+import { calcularMix, type DespesaVariavelDef, type EstrategiaDef } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 import { exportToExcel } from '../utils/export';
 import CostCompositionChart from '../components/CostCompositionChart';
@@ -15,14 +15,15 @@ import CostCompositionChart from '../components/CostCompositionChart';
 function calcSnapshotTotals(
   custoFixoTotalSnap: number,
   produtosSnap: ProdutoItem[],
-  definicoes: DespesaVariavelDef[]
+  definicoes: DespesaVariavelDef[],
+  estrategias: EstrategiaDef[]
 ) {
-  const mix = calcularMix(produtosSnap, custoFixoTotalSnap, definicoes);
+  const mix = calcularMix(produtosSnap, custoFixoTotalSnap, definicoes, estrategias);
   return { faturamento: mix.receitaTotal, lucro: mix.lucroLiquidoTotal };
 }
 
 export default function Dashboard() {
-  const { produtos, custosFixos, saveProduto, snapshots, createSnapshot, despesasVariaveis } = useAppContext();
+  const { produtos, custosFixos, saveProduto, snapshots, createSnapshot, despesasVariaveis, estrategias } = useAppContext();
 
   const [metaLucro, setMetaLucro] = useState<number>(0);
   const [metaModalOpen, setMetaModalOpen] = useState<boolean>(false);
@@ -44,7 +45,7 @@ export default function Dashboard() {
   const custoFixoTotal = custosFixos.reduce((a, b) => a + b.valor, 0);
 
   // Um único cálculo para a tela inteira — o mesmo que o Mix de Preços usa.
-  const mix = calcularMix(produtos, custoFixoTotal, despesasVariaveis);
+  const mix = calcularMix(produtos, custoFixoTotal, despesasVariaveis, estrategias);
 
   const {
     receitaTotal: receitaEstimada,
@@ -143,7 +144,7 @@ export default function Dashboard() {
 
   if (lastMonthSnapshot) {
     lastCustoFixo = lastMonthSnapshot.custoFixoTotal;
-    const lastTotals = calcSnapshotTotals(lastCustoFixo, lastMonthSnapshot.produtos, despesasVariaveis);
+    const lastTotals = calcSnapshotTotals(lastCustoFixo, lastMonthSnapshot.produtos, despesasVariaveis, estrategias);
     lastFaturamento = lastTotals.faturamento;
     lastLucro = lastTotals.lucro;
     const lastMargemContribuicaoTotal = lastLucro + lastCustoFixo;
@@ -155,7 +156,7 @@ export default function Dashboard() {
   const trendData = [...snapshots]
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
     .map(s => {
-      const totals = calcSnapshotTotals(s.custoFixoTotal, s.produtos, despesasVariaveis);
+      const totals = calcSnapshotTotals(s.custoFixoTotal, s.produtos, despesasVariaveis, estrategias);
       return {
         label: s.label || new Date(s.createdAt).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
         faturamento: totals.faturamento,
@@ -190,7 +191,8 @@ export default function Dashboard() {
       vendasProjetadas: (p.vendasProjetadas || 0) * (1 + varVendas / 100),
     })),
     simCustoFixo,
-    despesasVariaveis
+    despesasVariaveis,
+    estrategias
   );
   const simFat = simMix.receitaTotal;
   const simMC = simMix.margemContribuicaoTotal;

@@ -19,6 +19,41 @@ export interface DespesaVariavelDef {
   nome: string;
 }
 
+/**
+ * Uma faixa de margem nomeada — "Atração", "Padrão", "Margem alta".
+ *
+ * É o que troca a pergunta difícil ("que margem este produto leva?") por uma
+ * fácil ("este produto é de atração ou de margem?"). A política fica em um
+ * lugar só: mudar a margem da faixa muda o preço sugerido de todos os produtos
+ * que a seguem.
+ */
+export interface EstrategiaDef {
+  id: string;
+  nome: string;
+  /** Margem líquida alvo, em pontos percentuais. */
+  margem: number;
+}
+
+/**
+ * A margem que de fato vale para o produto e de onde ela veio.
+ *
+ * Um produto sem estratégia (ou apontando para uma que foi apagada) cai para a
+ * própria margem — é o modo "Personalizado", e é também o que impede que
+ * apagar uma faixa quebre o preço de quem a seguia.
+ */
+export function resolverMargem(
+  p: Pick<ProdutoCalculo, 'margem' | 'estrategiaId'>,
+  estrategias: EstrategiaDef[] = []
+): { margem: number; estrategia: EstrategiaDef | null } {
+  const estrategia = p.estrategiaId
+    ? estrategias.find(e => e.id === p.estrategiaId) ?? null
+    : null;
+  return {
+    margem: estrategia ? estrategia.margem : (p.margem || 0),
+    estrategia,
+  };
+}
+
 export interface ProdutoCalculo {
   id: string;
   nome?: string;
@@ -32,7 +67,10 @@ export interface ProdutoCalculo {
   comissao?: number;
   /** Percentuais das despesas variáveis personalizadas, por id da despesa. */
   despesasVariaveis?: DespesasVariaveisValores;
+  /** Margem própria do produto. Só vale quando não há estratégia. */
   margem?: number;
+  /** Faixa de margem que o produto segue; `null`/ausente = Personalizado. */
+  estrategiaId?: string | null;
   modoPrecificacao?: 'margem' | 'preco';
   precoFixo?: number;
 }
@@ -104,6 +142,10 @@ export interface ResultadoProduto {
   margemContribuicao: number;
   /** Unidades necessárias para pagar a cota de custo fixo deste produto. */
   peUnidades: number;
+  /** Margem alvo em vigor, venha da estratégia ou do próprio produto. */
+  margemAlvo: number;
+  /** A faixa que o produto segue, ou null quando é Personalizado. */
+  estrategia: EstrategiaDef | null;
   /** A margem de contribuição é positiva — o produto ajuda a pagar as contas. */
   isValidMargem: boolean;
   /** Tem rateio, mas nenhuma venda projetada: a cota dele some do preço. */
@@ -119,13 +161,14 @@ export interface ResultadoProduto {
 export function calcularProduto(
   p: ProdutoCalculo,
   custoFixoTotal: number,
-  definicoes: DespesaVariavelDef[] = []
+  definicoes: DespesaVariavelDef[] = [],
+  estrategias: EstrategiaDef[] = []
 ): ResultadoProduto {
   const imposto = p.imposto || 0;
   const taxaCartao = p.taxaCartao || 0;
   const comissao = p.comissao || 0;
   const personalizadas = somarDespesasPersonalizadas(p.despesasVariaveis, definicoes);
-  const margem = p.margem || 0;
+  const { margem, estrategia } = resolverMargem(p, estrategias);
   const vendas = p.vendasProjetadas || 0;
   const rateio = p.percentualRateio || 0;
 
@@ -178,6 +221,8 @@ export function calcularProduto(
     valorMargem,
     margemContribuicao,
     peUnidades: isValidMargem ? valorRateadoCF / margemContribuicao : Infinity,
+    margemAlvo: margem,
+    estrategia,
     isValidMargem,
     rateioOcioso: rateio > 0 && vendas <= 0,
   };
@@ -230,9 +275,13 @@ export interface ResultadoMix<T extends ProdutoCalculo = ProdutoCalculo> {
 export function calcularMix<T extends ProdutoCalculo>(
   produtos: T[],
   custoFixoTotal: number,
-  definicoes: DespesaVariavelDef[] = []
+  definicoes: DespesaVariavelDef[] = [],
+  estrategias: EstrategiaDef[] = []
 ): ResultadoMix<T> {
-  const calculados = produtos.map(p => ({ ...p, ...calcularProduto(p, custoFixoTotal, definicoes) }));
+  const calculados = produtos.map(p => ({
+    ...p,
+    ...calcularProduto(p, custoFixoTotal, definicoes, estrategias),
+  }));
 
   let receitaTotal = 0;
   let vendasTotais = 0;

@@ -33,6 +33,7 @@ import {
 import { FileText } from 'lucide-react';
 import CostCompositionChart from '../components/CostCompositionChart';
 import DespesasVariaveisManager from '../components/DespesasVariaveisManager';
+import EstrategiasManager, { SeletorEstrategia, SeloEstrategia } from '../components/Estrategias';
 
 type SortKey =
   | 'nome' | 'cmv' | 'vendas' | 'rateio' | 'imposto' | 'taxaCartao'
@@ -86,8 +87,12 @@ function campoDespesa(id: string, nome: string): BulkFieldDef {
   };
 }
 
+// A margem não está mais aqui de propósito. Aplicar o mesmo percentual ao
+// catálogo inteiro dá a todo produto o mesmo multiplicador sobre o custo, o que
+// deixa a loja cara justo nos itens que o cliente compara e barata nos que
+// ninguém confere. Quem quiser margem única continua conseguindo: é só aplicar
+// uma única estratégia a todos, no painel de estratégias logo acima.
 const BULK_FIELDS_FIXOS: BulkFieldDef[] = [
-  campoSimples('margem', 'Margem Líquida', TrendingUp),
   campoSimples('taxaCartao', 'Taxa Cartão / Maquineta', CreditCard),
   campoSimples('imposto', 'Impostos', Receipt),
   campoSimples('comissao', 'Comissão', Users),
@@ -147,7 +152,7 @@ const PriceInput = ({
 };
 
 export default function MixPrecoLote() {
-  const { produtos, custosFixos, setProdutos, syncProdutos, despesasVariaveis } = useAppContext();
+  const { produtos, custosFixos, setProdutos, syncProdutos, despesasVariaveis, estrategias } = useAppContext();
   const validProdutos = useMemo(() => produtos.filter(p => p.cmv > 0), [produtos]);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -213,7 +218,7 @@ export default function MixPrecoLote() {
   // Todo o cálculo do mix vem de src/domain/pricing — a mesma função que o
   // Dashboard usa. Antes, cada tela tinha a sua cópia da fórmula, e foi assim
   // que o export do Excel passou a mostrar números diferentes da tela.
-  const mix = calcularMix(validProdutos, custoFixoTotal, despesasVariaveis);
+  const mix = calcularMix(validProdutos, custoFixoTotal, despesasVariaveis, estrategias);
 
   const receitaTotal = mix.receitaTotal;
   const margemTotal = mix.margemContribuicaoTotal;
@@ -501,6 +506,21 @@ export default function MixPrecoLote() {
 
   // Aplica o mesmo valor de um campo (margem, taxa, imposto ou outros) para todos os produtos,
   // guardando os valores individuais anteriores para permitir desfazer.
+  /**
+   * Põe todos os produtos na mesma faixa.
+   *
+   * É o substituto honesto do antigo "aplicar 25% de margem a todos": o
+   * resultado imediato é o mesmo (todo mundo com a mesma margem alvo), mas
+   * agora isso é um ponto de partida explícito, e mover um produto para outra
+   * faixa depois é um clique — não uma edição solta que ninguém consegue
+   * auditar seis meses depois.
+   */
+  const aplicarEstrategiaATodos = (estrategiaId: string) => {
+    if (validProdutos.length === 0) return;
+    const updated = produtos.map(p => ({ ...p, estrategiaId }));
+    setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
+  };
+
   const applyBulkNow = (field: BulkField) => {
     if (validProdutos.length === 0) return;
     const def = bulkFields.find(f => f.key === field);
@@ -605,7 +625,36 @@ export default function MixPrecoLote() {
 
         {isPadronizarOpen && (
           <div className="p-4 sm:p-6 space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <EstrategiasManager compacto />
+
+          <div className="pt-4 border-t border-border">
+            <p className="text-xs font-semibold text-foreground mb-1">Aplicar uma estratégia a todos os produtos</p>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              Um ponto de partida para depois ajustar produto a produto — quem é atração e quem é margem.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {estrategias.map(e => {
+                const actionKey = `estrategia-${e.id}`;
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    onClick={() => requestConfirm(actionKey, () => aplicarEstrategiaATodos(e.id))}
+                    disabled={validProdutos.length === 0}
+                    className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      confirmingAction === actionKey
+                        ? 'bg-amber-500 text-white border-amber-500'
+                        : 'bg-background border-border hover:border-primary/40 hover:bg-muted/40'
+                    }`}
+                  >
+                    {confirmingAction === actionKey ? 'Confirmar?' : <>{e.nome} · {e.margem}%</>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-border">
             {bulkFields.map(meta => {
             const field = meta.key;
             const Icon = meta.icon;
@@ -772,6 +821,7 @@ export default function MixPrecoLote() {
                 <th className="px-3 py-3 sticky left-0 z-30 bg-muted/95 backdrop-blur border-r border-border w-[30%] min-w-[140px] text-xs">Produto</th>
                 <th className="px-2 py-3 text-center text-xs">Vendas</th>
                 <th className="px-2 py-3 text-center text-xs">Rateio%</th>
+                <th className="px-2 py-3 text-center text-xs">Estratégia</th>
                 <th className="px-2 py-3 text-center bg-orange-50/80 text-orange-700 font-semibold text-xs border-x border-orange-200/50">Preço Sugerido</th>
                 <th className="px-2 py-3 text-center bg-primary text-primary-foreground text-xs">
                   <span className="inline-flex items-center gap-1.5">
@@ -829,10 +879,17 @@ export default function MixPrecoLote() {
                           className={`w-16 mx-auto block px-2 py-1 border rounded text-sm font-bold text-center ${p.semRateio ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-amber-300 text-amber-900'} focus:ring-2 focus:ring-amber-500/50`}
                         />
                       </td>
+                      <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        <SeletorEstrategia
+                          produto={p}
+                          onChange={(updates) => handleUpdateProduto(p.id, updates)}
+                          compacto
+                        />
+                      </td>
                       <td className="px-2 py-2 text-center bg-orange-50/40 border-x border-orange-200/30" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-col items-center justify-center">
                           <span className="text-sm font-bold text-orange-700">{formatCurrency(p.precoSugerido)}</span>
-                          <span className={`text-[10px] font-medium mt-0.5 ${p.valorMargemSugerido >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>L.L: {formatCurrency(p.valorMargemSugerido)} ({(p.margem || 0).toFixed(1)}%)</span>
+                          <span className={`text-[10px] font-medium mt-0.5 ${p.valorMargemSugerido >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>L.L: {formatCurrency(p.valorMargemSugerido)} ({p.margemAlvo.toFixed(1)}%)</span>
                         </div>
                       </td>
                       <td className="px-2 py-2 text-center bg-primary/5" onClick={(e) => e.stopPropagation()}>
@@ -899,7 +956,7 @@ export default function MixPrecoLote() {
                     {/* Painel expandido: mesmos elementos e campos editáveis do Mix de Preços */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={reformaConfig.ativo ? 7 : 6} className="p-0 bg-muted/20">
+                        <td colSpan={reformaConfig.ativo ? 8 : 7} className="p-0 bg-muted/20">
                           <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
                             {/* Inputs */}
                             <div className="col-span-1 lg:col-span-4 space-y-4">
@@ -960,8 +1017,31 @@ export default function MixPrecoLote() {
                                 <div>
                                   {(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? (
                                     <>
-                                      <label className="block text-xs font-medium text-muted-foreground mb-1">Margem Líquida (%)</label>
-                                      <input type="number" value={p.margem} onChange={(e) => handleUpdateProduto(p.id, { margem: Number(e.target.value) })} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
+                                      <label className="block text-xs font-medium text-muted-foreground mb-1">
+                                        Margem Líquida (%)
+                                        {p.estrategia && (
+                                          <span className="ml-1.5 font-normal normal-case">
+                                            — vem de <SeloEstrategia estrategia={p.estrategia} />
+                                          </span>
+                                        )}
+                                      </label>
+                                      {/* Com uma faixa ativa, quem manda na margem é ela: o campo
+                                          mostra o valor em vigor e fica travado, para não existirem
+                                          dois números disputando o mesmo preço. */}
+                                      <input
+                                        type="number"
+                                        value={p.margemAlvo}
+                                        disabled={!!p.estrategia}
+                                        onChange={(e) => handleUpdateProduto(p.id, { margem: Number(e.target.value) })}
+                                        title={p.estrategia ? `Definida pela estratégia ${p.estrategia.nome}. Mude a faixa para "Personalizado" para editar só este produto.` : undefined}
+                                        className={`w-full px-3 py-2 border border-border rounded-md font-bold text-sm focus:ring-2 focus:ring-primary/50 ${p.estrategia ? 'bg-muted/40 text-muted-foreground cursor-not-allowed' : 'bg-primary/10 text-primary'}`}
+                                      />
+                                      <div className="mt-1.5">
+                                        <SeletorEstrategia
+                                          produto={p}
+                                          onChange={(updates) => handleUpdateProduto(p.id, updates)}
+                                        />
+                                      </div>
                                     </>
                                   ) : (
                                     <>

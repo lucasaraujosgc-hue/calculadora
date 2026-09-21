@@ -46,6 +46,13 @@ export const products = pgTable('products', {
    * escrita só por produto.
    */
   despesasVariaveis: jsonb('despesas_variaveis').default({}).notNull(),
+  /**
+   * Estratégia de margem que o produto segue. Quando preenchida, a margem vem
+   * dela e o campo `margem` abaixo fica só como último valor conhecido — é o
+   * que permite voltar para "Personalizado" sem o preço dar um salto.
+   * `null` = Personalizado: vale a margem do próprio produto.
+   */
+  estrategiaId: uuid('estrategia_id'),
   isSample: boolean('is_sample').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -71,6 +78,35 @@ export const variableExpenses = pgTable('variable_expenses', {
 }, (t) => ({
   nomeUnicoPorUsuario: unique('variable_expenses_user_name_key').on(t.userId, t.name),
   porUsuario: index('variable_expenses_user_idx').on(t.userId),
+}));
+
+/**
+ * Estratégias de margem de cada usuário.
+ *
+ * Em vez de uma margem solta por produto (ou, pior, a mesma margem para o
+ * catálogo inteiro), o lojista define poucas faixas com nome — "Atração",
+ * "Padrão", "Margem alta" — e diz a que faixa cada produto pertence. Mudar a
+ * política de preço do item de atração vira uma edição, não trezentas.
+ *
+ * Toda conta nasce com as três faixas padrão (ver `ESTRATEGIAS_PADRAO` no
+ * servidor), e daí o usuário renomeia, ajusta os percentuais, cria ou apaga.
+ * Como tudo é filtrado por `userId`, as faixas de uma empresa não aparecem em
+ * nenhuma outra.
+ */
+export const pricingStrategies = pgTable('pricing_strategies', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  name: text('name').notNull(),
+  /** Margem líquida alvo, em pontos percentuais (20 = 20%). */
+  margem: doublePrecision('margem').default(0).notNull(),
+  /** Cor do selo na tabela do Mix, para bater o olho e enxergar o mix. */
+  cor: text('cor').default('slate').notNull(),
+  position: integer('position').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  nomeUnicoPorUsuario: unique('pricing_strategies_user_name_key').on(t.userId, t.name),
+  porUsuario: index('pricing_strategies_user_idx').on(t.userId),
 }));
 
 export const fixedCosts = pgTable('fixed_costs', {
