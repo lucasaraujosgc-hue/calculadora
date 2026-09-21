@@ -20,6 +20,7 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import { ErroNotaFiscal, direcaoDaNota, lerNotaFiscal, normalizarDescricao, somenteDigitos } from "./src/domain/fiscal/nfe.js";
 import { sugerirVinculos } from "./src/domain/fiscal/sugestoes.js";
+import { sugerirConciliacao } from "./src/domain/fiscal/conciliacao.js";
 import AdmZip from "adm-zip";
 import { aplicarVinculos, resumirPorProdutoPeriodo, type ItemComContexto } from "./src/domain/fiscal/agregacao.js";
 import { estimarElasticidade } from "./src/domain/elasticidade/index.js";
@@ -1751,6 +1752,115 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
 // ---------------------------------------------------------------------------
 // Vínculos entre produtos com unidades diferentes (fardo × unidade)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Conciliação entre o cadastro e as notas
+// ---------------------------------------------------------------------------
+//
+// Produtos aplicados a partir de uma nota já nascem com `chave_fiscal`. Esta
+// rota existe para o catálogo anterior — digitado à mão ou vindo de planilha —
+// que precisa ser amarrado uma vez. Propõe; quem confirma é o usuário.
+
+/** Reconstrói o resumo fiscal do usuário, já com os vínculos de embalagem. */
+async function produtosFiscaisDoUsuario(userId: string) {
+  const linhas = await db.select().from(fiscalItems).where(eq(fiscalItems.userId, userId));
+  if (linhas.length === 0) return [];
+
+  const vinculos = await db.select().from(fiscalProductLinks)
+    .where(eq(fiscalProductLinks.userId, userId));
+  const confirmados = vinculos.filter((v: any) => v.status === "confirmado" && v.origem !== "nota");
+
+  const itens: ItemComContexto[] = linhas.map((l: any) => ({
+    direcao: l.direcao,
+    competencia: l.competencia,
+    item: l as any,
+  }));
+
+  return resumirPorProdutoPeriodo(aplicarVinculos(itens, confirmados as any))
+    .map(p => ({ chaveProduto: p.chaveProduto, descricao: p.descricao, ean: p.ean }));
+}
+
+app.get("/api/fiscal/conciliacao", requireUser, async (req: any, res) => {
+  const userId = req.currentUser.id;
+
+  const cadastro = await db.select().from(products)
+    .where(and(eq(products.userId, userId), eq(products.isSample, false)))
+    .orderBy(asc(products.createdAt), asc(products.id));
+
+  const fiscais = await produtosFiscaisDoUsuario(userId);
+
+  const sugestoes = sugerirConciliacao(
+    cadastro.map(p => ({ id: p.id, nome: p.name, chaveFiscal: p.chaveFiscal })),
+    fiscais
+  );
+
+  res.json({
+    sugestoes,
+    // Para o seletor manual: tudo que ainda não tem dono.
+    disponiveis: fiscais.filter(f => !cadastro.some(p => p.chaveFiscal === f.chaveProduto)),
+    totalCadastro: cadastro.length,
+    totalConciliados: cadastro.filter(p => p.chaveFiscal).length,
+  });
+});
+
+app.post("/api/fiscal/conciliacao", requireUser, async (req: any, res) => {
+  const userId = req.currentUser.id;
+  const pedidos: any[] = Array.isArray(req.body?.vinculos) ? req.body.vinculos : [];
+  if (pedidos.length === 0) return res.status(400).json({ error: "Nenhum vínculo informado." });
+
+  const cadastro = await db.select().from(products)
+    .where(and(eq(products.userId, userId), eq(products.isSample, false)));
+  const porId = new Map(cadastro.map((p: any) => [p.id as string, p]));
+
+  // Chaves que já têm dono não podem ser reatribuídas nesta mesma leva sem que
+  // o dono anterior seja liberado antes — é o que mantém a relação 1:1.
+  const tomadas = new Set<string>(
+    cadastro.map((p: any) => p.chaveFiscal).filter((c: any): c is string => !!c)
+  );
+
+  let vinculados = 0;
+  let desvinculados = 0;
+  const recusados: { produtoId: string; motivo: string }[] = [];
+
+  for (const pedido of pedidos) {
+    const produtoId = String(pedido?.produtoId ?? "").trim();
+    const chave = String(pedido?.chaveProduto ?? "").trim();
+    const produto: any = porId.get(produtoId);
+
+    if (!produto) {
+      recusados.push({ produtoId, motivo: "Produto não encontrado." });
+      continue;
+    }
+
+    // Chave vazia desfaz o vínculo — é como o usuário corrige um casamento errado.
+    if (!chave) {
+      if (produto.chaveFiscal) {
+        tomadas.delete(produto.chaveFiscal);
+        await db.update(products).set({ chaveFiscal: null, updatedAt: new Date() })
+          .where(and(eq(products.id, produtoId as any), eq(products.userId, userId)));
+        produto.chaveFiscal = null;
+        desvinculados += 1;
+      }
+      continue;
+    }
+
+    if (produto.chaveFiscal === chave) continue;
+
+    if (tomadas.has(chave)) {
+      recusados.push({ produtoId, motivo: "Esse produto das notas já está vinculado a outro item do cadastro." });
+      continue;
+    }
+
+    if (produto.chaveFiscal) tomadas.delete(produto.chaveFiscal);
+    tomadas.add(chave);
+    await db.update(products).set({ chaveFiscal: chave, updatedAt: new Date() })
+      .where(and(eq(products.id, produtoId as any), eq(products.userId, userId)));
+    produto.chaveFiscal = chave;
+    vinculados += 1;
+  }
+
+  res.json({ success: true, vinculados, desvinculados, recusados });
+});
 
 app.post("/api/fiscal/vinculos", requireUser, async (req: any, res) => {
   try {

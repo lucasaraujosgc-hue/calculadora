@@ -52,7 +52,7 @@ export function fatorNaDescricao(descricao: string): number | null {
 }
 
 /** Palavras úteis de uma descrição, já sem as que indicam embalagem. */
-function tokensUteis(descricao: string): string[] {
+export function tokensUteis(descricao: string): string[] {
   return String(descricao ?? '')
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')

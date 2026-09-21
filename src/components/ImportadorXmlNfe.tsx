@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import PainelElasticidade from './PainelElasticidade';
+import ConciliacaoProdutos from './ConciliacaoProdutos';
 import { formatCurrency } from '../utils/format';
 import { sugerirCadastro } from '../domain/fiscal/agregacao';
 import type { ResumoProduto } from '../domain/fiscal/tipos';
@@ -999,6 +1000,10 @@ export default function ImportadorXmlNfe() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              <div className="border border-border rounded-lg p-3">
+                <ConciliacaoProdutos />
               </div>
 
               {vinculos.some(v => v.status === 'confirmado') && (
