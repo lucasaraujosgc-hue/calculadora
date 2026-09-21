@@ -40,10 +40,26 @@ const CORES_ABC: Record<ClasseABC, { fill: string; selo: string }> = {
   C: { fill: '#a78bfa', selo: 'bg-slate-50 text-slate-600 border-slate-200' },
 };
 
-const DESCRICAO_CLASSE: Record<ClasseABC, string> = {
-  A: `os poucos que fazem os primeiros ${CORTE_A}%`,
-  B: `os seguintes, até ${CORTE_B}%`,
-  C: 'a cauda longa',
+/**
+ * Nome e explicação de cada classe, em português de balcão.
+ *
+ * "Cauda longa" e "os primeiros 80% do acumulado" são jargão de quem já sabe o
+ * que é curva ABC. Quem abre esta tela pela primeira vez precisa saber o que o
+ * grupo significa para a loja dele, não como o corte foi calculado.
+ */
+const CLASSES: Record<ClasseABC, { titulo: string; explicacao: string }> = {
+  A: {
+    titulo: 'Seus campeões',
+    explicacao: `Poucos produtos que, somados, fazem os primeiros ${CORTE_A}% do total. São os que o cliente conhece de cor e compara de loja em loja.`,
+  },
+  B: {
+    titulo: 'O meio do caminho',
+    explicacao: `Vêm logo depois e completam até ${CORTE_B}%. Vendem bem, mas não sustentam a loja sozinhos.`,
+  },
+  C: {
+    titulo: 'O resto do catálogo',
+    explicacao: 'Muitos produtos, cada um com pouca participação. Juntos não chegam a 5% — e quase ninguém confere o preço deles.',
+  },
 };
 
 /** Selo da classe para a tabela do Mix. */
@@ -52,7 +68,7 @@ export function SeloClasseABC({ classe }: { classe?: ClasseABC }) {
   return (
     <span
       className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-xs font-bold border ${CORES_ABC[classe].selo}`}
-      title={`Classe ${classe} — ${DESCRICAO_CLASSE[classe]}`}
+      title={`Classe ${classe} — ${CLASSES[classe].titulo}. ${CLASSES[classe].explicacao}`}
     >
       {classe}
     </span>
@@ -131,10 +147,14 @@ export default function CurvaABC({
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <BarChart3 className="w-4 h-4 text-primary" /> Curva ABC do seu mix
         </h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Quase sempre um punhado de produtos responde pela maior parte do resultado. São esses que o
-          cliente conhece de cor e compara de loja em loja — e é por isso que costumam pedir margem menor,
-          não maior.
+        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+          A curva ABC enfileira seus produtos do que mais pesa para o que menos pesa e corta a fila em
+          três grupos. Quase sempre um punhado deles responde pela maior parte do resultado — e são
+          justamente esses que o cliente conhece de cor e compara de loja em loja.
+        </p>
+        <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+          Serve para você não dar a mesma margem para todo mundo: quem puxa cliente para dentro pede
+          preço competitivo, quem ninguém confere é onde a margem passa despercebida.
         </p>
       </div>
 
@@ -171,38 +191,52 @@ export default function CurvaABC({
                   className="flex items-center justify-center min-w-0 first:rounded-l-lg last:rounded-r-lg"
                 >
                   {c.participacao >= 8 && (
-                    <span className="text-[11px] font-bold text-white truncate px-1">
+                    <span className="text-[11px] font-bold text-white px-1 whitespace-nowrap overflow-hidden text-ellipsis">
                       {c.classe} · {c.participacao.toFixed(0)}%
+                      {c.participacao >= 20 && ` · ${c.quantidade} ${c.quantidade === 1 ? 'produto' : 'produtos'}`}
                     </span>
                   )}
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              Fatia de cada classe em {criterioAtual.label.toLowerCase()} — total de {formatarValor(abc.total)}.
+            <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
+              Largura de cada faixa = quanto o grupo pesa em {criterioAtual.label.toLowerCase()}.
+              Total de {formatarValor(abc.total)}.
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {abc.resumo.map(c => (
-              <div key={c.classe} className="p-3 rounded-xl border border-border bg-background">
-                <div className="flex items-center gap-2 mb-1.5">
+              <div key={c.classe} className="p-3 rounded-xl border border-border bg-background flex flex-col">
+                <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: CORES_ABC[c.classe].fill }} />
-                  <span className="text-xs font-bold text-foreground">Classe {c.classe}</span>
-                  <span className="text-[10px] text-muted-foreground truncate">{DESCRICAO_CLASSE[c.classe]}</span>
+                  <span className="text-xs font-bold text-foreground">
+                    Classe {c.classe} · {CLASSES[c.classe].titulo}
+                  </span>
                 </div>
-                <p className="text-xl font-bold text-foreground leading-tight">
+
+                {/* Sem truncate: a explicação da classe é justamente o que faltava
+                    para a tela ser entendida, e cortá-la a meia frase é pior do
+                    que ocupar duas linhas. */}
+                {/* Altura mínima só nos três lado a lado: sem ela, a explicação
+                    mais curta puxa o número da classe B para cima e as três
+                    colunas ficam desencontradas. Empilhado, não faz sentido. */}
+                <p className="text-[10px] text-muted-foreground leading-relaxed mt-1 sm:min-h-[3.75rem]">
+                  {CLASSES[c.classe].explicacao}
+                </p>
+
+                <p className="text-xl font-bold text-foreground leading-tight mt-2">
                   {c.quantidade}
                   <span className="text-xs font-medium text-muted-foreground ml-1">
                     {c.quantidade === 1 ? 'produto' : 'produtos'}
                   </span>
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {c.participacao.toFixed(1)}% · {formatarValor(c.valor)}
+                  {c.participacao.toFixed(1)}% do total · {formatarValor(c.valor)}
                 </p>
 
-                <div className="mt-2.5 pt-2.5 border-t border-border">
-                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">
+                <div className="mt-auto pt-2.5 border-t border-border">
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1 mt-2.5">
                     Estratégia sugerida
                   </label>
                   <select
