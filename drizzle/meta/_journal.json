@@ -15,6 +15,13 @@
       "when": 1786952306762,
       "tag": "0001_glamorous_baron_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0002_variable_expenses",
+      "breakpoints": true
     }
   ]
 }

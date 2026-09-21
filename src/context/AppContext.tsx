@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 
 export type User = {
   name: string;
@@ -18,6 +18,17 @@ export type CustoFixoItem = {
   valor: number;
 };
 
+/**
+ * Uma despesa variável criada pelo próprio usuário (ex.: "Frete", "Embalagem").
+ * A lista é individual: vem de /api/variable-expenses, que filtra por usuário,
+ * ou do armazenamento local do navegador no modo visitante.
+ */
+export type DespesaVariavelItem = {
+  id: string;
+  nome: string;
+  posicao?: number;
+};
+
 export type ProdutoItem = {
   id: string;
   nome: string;
@@ -32,6 +43,8 @@ export type ProdutoItem = {
   modoPrecificacao?: 'margem' | 'preco';
   precoFixo?: number;
   precoVenda?: number;
+  /** Percentual de cada despesa variável personalizada, por id da despesa. */
+  despesasVariaveis?: Record<string, number>;
 };
 
 export type SnapshotItem = {
@@ -61,6 +74,11 @@ type AppContextType = {
   removeProduto: (id: string) => Promise<void>;
   saveCustoFixo: (c: CustoFixoItem) => Promise<void>;
   removeCustoFixo: (id: string) => Promise<void>;
+
+  despesasVariaveis: DespesaVariavelItem[];
+  addDespesaVariavel: (nome: string) => Promise<void>;
+  renameDespesaVariavel: (id: string, nome: string) => Promise<void>;
+  removeDespesaVariavel: (id: string) => Promise<void>;
   snapshots: SnapshotItem[];
   fetchSnapshots: () => Promise<void>;
   createSnapshot: () => Promise<void>;
@@ -112,6 +130,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return parsed && parsed.length > 0 ? parsed : defaultCustos;
   });
   const [snapshots, setSnapshots] = useState<SnapshotItem[]>([]);
+  // A lista de despesas variáveis do usuário. No modo visitante fica só no
+  // navegador; logado, vem da API já filtrada pelo userId — o que um usuário
+  // cria nunca aparece na conta de outro.
+  const [despesasVariaveis, setDespesasVariaveis] = useState<DespesaVariavelItem[]>(() => {
+    const saved = localStorage.getItem('vc_despesas_variaveis') || sessionStorage.getItem('vc_despesas_variaveis');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [produtos, setProdutos] = useState<ProdutoItem[]>(() => {
     const saved = localStorage.getItem('vc_produtos') || sessionStorage.getItem('vc_produtos');
     const parsed = saved ? JSON.parse(saved) : null;
@@ -144,10 +169,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Fetch from API
       Promise.all([
         fetch('/api/fixed-costs').then(res => res.json()),
-        fetch('/api/products').then(res => res.json())
-      ]).then(([custos, prods]) => {
+        fetch('/api/products').then(res => res.json()),
+        fetch('/api/variable-expenses').then(res => res.json())
+      ]).then(([custos, prods, despesas]) => {
         if (Array.isArray(custos)) setCustosFixos(custos);
         if (Array.isArray(prods)) setProdutos(prods);
+        if (Array.isArray(despesas)) setDespesasVariaveis(despesas);
       }).catch(err => {
         console.error("Error loading data from API", err);
       });
@@ -186,8 +213,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const storage = localStorage.getItem('vc_custos') ? localStorage : sessionStorage;
       storage.setItem('vc_custos', JSON.stringify(custosFixos));
       storage.setItem('vc_produtos', JSON.stringify(produtos));
+      storage.setItem('vc_despesas_variaveis', JSON.stringify(despesasVariaveis));
     }
-  }, [custosFixos, produtos, user, isGuest]);
+  }, [custosFixos, produtos, despesasVariaveis, user, isGuest]);
 
   const login = (u: User, remember: boolean) => {
     setUser(u);
@@ -287,24 +315,145 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-    const syncProdutos = async (ps: ProdutoItem[]) => {
-    if (user && !isGuest) {
+  // Salvamento agrupado do mix.
+  //
+  // A tela de Preços em Lote chama o sync a cada tecla digitada em Vendas,
+  // Rateio, Preço e CMV. Sem o agrupamento abaixo, cada caractere virava uma
+  // gravação do mix inteiro — e várias delas ficavam em voo ao mesmo tempo,
+  // podendo chegar fora de ordem e gravar um valor velho por último.
+  //
+  // O estado local muda na hora (a digitação não trava); a rede espera a pausa.
+  const syncTimerRef = useRef<number | null>(null);
+  const pendenteRef = useRef<ProdutoItem[] | null>(null);
+  const enviandoRef = useRef(false);
+
+  // Função simples, não memoizada: ela só toca refs e o setProdutos, então a
+  // identidade dela entre renders não importa — e a chamada recursiva no final
+  // (para reenviar o que chegou durante o envio) impede a memoização mesmo.
+  const enviarProdutos = async (): Promise<void> => {
+    const aEnviar = pendenteRef.current;
+    if (!aEnviar || enviandoRef.current) return;
+
+    enviandoRef.current = true;
+    try {
       const res = await fetch('/api/products/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(ps)
+        body: JSON.stringify(aEnviar)
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Erro ao sincronizar produtos");
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Erro ao sincronizar produtos');
       }
       const data = await res.json();
-      // Data might be slightly different shaped (backend sends back the updated array).
-      // Since it's a sync, it's probably best to just set them:
-      setProdutos(ps); 
-    } else {
-      setProdutos(ps);
+
+      // Produtos criados offline ganham id de verdade no banco, e é a resposta
+      // que traz esse id. Só adotamos a lista do servidor se nada foi digitado
+      // enquanto a requisição estava em voo — caso contrário a adoção
+      // sobrescreveria o que a pessoa acabou de escrever, e a próxima rodada
+      // concilia de novo.
+      if (pendenteRef.current === aEnviar && Array.isArray(data.products)) {
+        pendenteRef.current = null;
+        setProdutos(data.products);
+      }
+    } finally {
+      enviandoRef.current = false;
+      // Chegou edição nova durante o envio: manda o que ficou para trás.
+      if (pendenteRef.current && pendenteRef.current !== aEnviar) {
+        void enviarProdutos();
+      }
     }
+  };
+
+  const syncProdutos = async (ps: ProdutoItem[]) => {
+    setProdutos(ps);
+    if (!user || isGuest) return;
+
+    pendenteRef.current = ps;
+    if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = window.setTimeout(() => {
+      syncTimerRef.current = null;
+      void enviarProdutos();
+    }, 700);
+  };
+
+  // Fechar a aba no meio da pausa não pode custar as últimas edições.
+  useEffect(() => {
+    const salvarPendente = () => {
+      if (!pendenteRef.current || !user || isGuest) return;
+      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+      navigator.sendBeacon?.(
+        '/api/products/sync',
+        new Blob([JSON.stringify(pendenteRef.current)], { type: 'application/json' })
+      );
+    };
+    window.addEventListener('beforeunload', salvarPendente);
+    return () => {
+      window.removeEventListener('beforeunload', salvarPendente);
+      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+    };
+  }, [user, isGuest]);
+
+  // --- Despesas variáveis personalizadas -----------------------------------
+  //
+  // No modo visitante tudo acontece no navegador. Logado, cada chamada vai para
+  // /api/variable-expenses, que só enxerga as linhas do próprio usuário.
+
+  const addDespesaVariavel = async (nomeBruto: string) => {
+    const nome = nomeBruto.trim().replace(/\s+/g, ' ');
+    if (!nome) throw new Error('Dê um nome para a despesa.');
+    if (despesasVariaveis.some(d => d.nome.toLowerCase() === nome.toLowerCase())) {
+      throw new Error(`Você já tem uma despesa chamada "${nome}".`);
+    }
+
+    if (user && !isGuest) {
+      const res = await fetch('/api/variable-expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao criar a despesa');
+      setDespesasVariaveis(prev => [...prev, data.despesa]);
+    } else {
+      if (despesasVariaveis.length >= 12) {
+        throw new Error('Você já tem 12 despesas variáveis. Remova alguma para criar outra.');
+      }
+      setDespesasVariaveis(prev => [
+        ...prev,
+        { id: crypto.randomUUID(), nome, posicao: prev.length }
+      ]);
+    }
+  };
+
+  const renameDespesaVariavel = async (id: string, nomeBruto: string) => {
+    const nome = nomeBruto.trim().replace(/\s+/g, ' ');
+    if (!nome) throw new Error('Dê um nome para a despesa.');
+    if (despesasVariaveis.some(d => d.id !== id && d.nome.toLowerCase() === nome.toLowerCase())) {
+      throw new Error(`Você já tem uma despesa chamada "${nome}".`);
+    }
+
+    if (user && !isGuest) {
+      const res = await fetch(`/api/variable-expenses/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao renomear a despesa');
+    }
+    setDespesasVariaveis(prev => prev.map(d => (d.id === id ? { ...d, nome } : d)));
+  };
+
+  const removeDespesaVariavel = async (id: string) => {
+    if (user && !isGuest) {
+      const res = await fetch(`/api/variable-expenses/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Erro ao excluir a despesa');
+    }
+    // Os percentuais continuam gravados nos produtos de propósito: o motor de
+    // preço só soma as despesas que ainda existem na lista, então a despesa sai
+    // do preço na hora sem apagar o que a pessoa já tinha preenchido.
+    setDespesasVariaveis(prev => prev.filter(d => d.id !== id));
   };
 
   const removeProduto = async (id: string) => {
@@ -354,6 +503,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       produtos, setProdutos,
       saveProduto, removeProduto, syncProdutos,
       saveCustoFixo, removeCustoFixo,
+      despesasVariaveis, addDespesaVariavel, renameDespesaVariavel, removeDespesaVariavel,
       snapshots, fetchSnapshots, createSnapshot
     }}>
       {children}

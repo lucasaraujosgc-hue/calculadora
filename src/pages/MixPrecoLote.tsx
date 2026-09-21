@@ -21,7 +21,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
-import { calculateSellingPrice } from '../domain/pricing';
+import { calcularMix, calculateSellingPrice } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 import { exportToExcel } from '../utils/export';
 import {
@@ -32,24 +32,66 @@ import {
 } from '../components/ReformaPreco';
 import { FileText } from 'lucide-react';
 import CostCompositionChart from '../components/CostCompositionChart';
+import DespesasVariaveisManager from '../components/DespesasVariaveisManager';
 
 type SortKey =
   | 'nome' | 'cmv' | 'vendas' | 'rateio' | 'imposto' | 'taxaCartao'
   | 'comissao' | 'margem' | 'preco' | 'margemContribuicao' | 'valorMargem' | 'peUnidades';
 
-type FilterMode = 'todos' | 'sem-rateio' | 'prejuizo';
+type FilterMode = 'todos' | 'sem-rateio' | 'prejuizo' | 'rateio-ocioso';
 
-type BulkField = 'margem' | 'taxaCartao' | 'imposto' | 'comissao';
+/**
+ * Campo aplicável em massa. Os quatro primeiros são fixos; além deles entram as
+ * despesas variáveis que o usuário criou, com a chave `despesa:<id>`.
+ */
+type BulkField = string;
+
+interface BulkFieldDef {
+  key: BulkField;
+  label: string;
+  icon: typeof TrendingUp;
+  ler: (p: ProdutoItem) => number;
+  aplicar: (p: ProdutoItem, valor: number) => ProdutoItem;
+}
 
 const ITEMS_PER_PAGE = 15;
 const CONFIRM_TIMEOUT_MS = 3500;
 
-const BULK_FIELD_META: Record<BulkField, { label: string; productKey: keyof ProdutoItem; icon: typeof TrendingUp }> = {
-  margem: { label: 'Margem Líquida', productKey: 'margem', icon: TrendingUp },
-  taxaCartao: { label: 'Taxa Cartão / Maquineta', productKey: 'taxaCartao', icon: CreditCard },
-  imposto: { label: 'Impostos', productKey: 'imposto', icon: Receipt },
-  comissao: { label: 'Outros (Comissão e afins)', productKey: 'comissao', icon: Users },
-};
+/** Campo simples: grava direto numa propriedade numérica do produto. */
+function campoSimples(
+  key: keyof ProdutoItem,
+  label: string,
+  icon: typeof TrendingUp
+): BulkFieldDef {
+  return {
+    key,
+    label,
+    icon,
+    ler: p => Number(p[key]) || 0,
+    aplicar: (p, valor) => ({ ...p, [key]: valor }),
+  };
+}
+
+/** Campo de despesa personalizada: grava dentro do mapa `despesasVariaveis`. */
+function campoDespesa(id: string, nome: string): BulkFieldDef {
+  return {
+    key: `despesa:${id}`,
+    label: nome,
+    icon: Tag,
+    ler: p => Number(p.despesasVariaveis?.[id]) || 0,
+    aplicar: (p, valor) => ({
+      ...p,
+      despesasVariaveis: { ...(p.despesasVariaveis || {}), [id]: valor },
+    }),
+  };
+}
+
+const BULK_FIELDS_FIXOS: BulkFieldDef[] = [
+  campoSimples('margem', 'Margem Líquida', TrendingUp),
+  campoSimples('taxaCartao', 'Taxa Cartão / Maquineta', CreditCard),
+  campoSimples('imposto', 'Impostos', Receipt),
+  campoSimples('comissao', 'Comissão', Users),
+];
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'nome', label: 'Nome (A-Z)' },
@@ -105,7 +147,7 @@ const PriceInput = ({
 };
 
 export default function MixPrecoLote() {
-  const { produtos, custosFixos, setProdutos, syncProdutos } = useAppContext();
+  const { produtos, custosFixos, setProdutos, syncProdutos, despesasVariaveis } = useAppContext();
   const validProdutos = useMemo(() => produtos.filter(p => p.cmv > 0), [produtos]);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -114,7 +156,7 @@ export default function MixPrecoLote() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const [bulkInputs, setBulkInputs] = useState<Record<BulkField, number>>({ margem: 0, taxaCartao: 0, imposto: 0, comissao: 0 });
+  const [bulkInputs, setBulkInputs] = useState<Record<BulkField, number>>({});
   const [bulkSnapshots, setBulkSnapshots] = useState<Partial<Record<BulkField, Record<string, number>>>>({});
   const [isPadronizarOpen, setIsPadronizarOpen] = useState(false);
 
@@ -147,6 +189,12 @@ export default function MixPrecoLote() {
     confirmTimeoutRef.current = window.setTimeout(() => setConfirmingAction(null), CONFIRM_TIMEOUT_MS);
   };
 
+  // Os quatro campos fixos mais uma coluna por despesa variável cadastrada.
+  const bulkFields: BulkFieldDef[] = useMemo(
+    () => [...BULK_FIELDS_FIXOS, ...despesasVariaveis.map(d => campoDespesa(d.id, d.nome))],
+    [despesasVariaveis]
+  );
+
   const custoFixoTotal = custosFixos.reduce((acc, curr) => acc + curr.valor, 0);
 
   // Projeção do preço na Reforma Tributária (compartilhada com a Formação de Preço)
@@ -162,103 +210,59 @@ export default function MixPrecoLote() {
   const rateioPendente = 100 - totalRateio;
   const valorPendente = (rateioPendente / 100) * custoFixoTotal;
 
-  let receitaTotal = 0;
-  let margemTotal = 0;
-  let vendasTotais = 0;
-  let receitaTotalReforma = 0;
+  // Todo o cálculo do mix vem de src/domain/pricing — a mesma função que o
+  // Dashboard usa. Antes, cada tela tinha a sua cópia da fórmula, e foi assim
+  // que o export do Excel passou a mostrar números diferentes da tela.
+  const mix = calcularMix(validProdutos, custoFixoTotal, despesasVariaveis);
+
+  const receitaTotal = mix.receitaTotal;
+  const margemTotal = mix.margemContribuicaoTotal;
+  const vendasTotais = mix.vendasTotais;
+  const lucroMix = mix.lucroLiquidoTotal;
 
   const dataGraficoTotal: { name: string, value: number }[] = [
     { name: 'Custo Variável (CMV)', value: 0 },
     { name: 'Custo Fixo Unitário', value: 0 },
     { name: 'Impostos', value: 0 },
-    { name: 'Taxas & Comissões', value: 0 },
+    { name: 'Taxas & Despesas', value: 0 },
     { name: 'Lucro Líquido', value: 0 },
   ];
 
-  const processedProdutos = validProdutos.map(p => {
-    const imposto = p.imposto || 0;
-    const taxaCartao = p.taxaCartao || 0;
-    const comissao = p.comissao || 0;
-    const margem = p.margem || 0;
+  let receitaTotalReforma = 0;
+
+  const processedProdutos = mix.produtos.map(p => {
     const vendas = p.vendasProjetadas || 0;
-    const rateio = p.percentualRateio || 0;
-
-    const valorRateadoCF = (rateio / 100) * custoFixoTotal;
-    const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
-
-    const despesasVariaveisPerc = imposto + taxaCartao + comissao;
-    const precoSugerido = calculateSellingPrice(p.cmv, custoFixoUnitario, imposto/100, taxaCartao/100, comissao/100, margem/100);
-    const valorMargemSugerido = precoSugerido * (margem / 100);
-
-    let preco = 0;
-    let margemReal = margem;
-
-    if (p.modoPrecificacao === 'preco') {
-      preco = p.precoFixo || 0;
-      const custoTot = p.cmv + custoFixoUnitario;
-      const descontosVariaveis = preco * (despesasVariaveisPerc / 100);
-      const lucroReais = preco - custoTot - descontosVariaveis;
-      margemReal = preco > 0 ? (lucroReais / preco) * 100 : 0;
-    } else {
-      preco = calculateSellingPrice(p.cmv, custoFixoUnitario, imposto/100, taxaCartao/100, comissao/100, margem/100);
-    }
-
-    const valorImposto = preco * (imposto / 100);
-    const valorTaxa = preco * (taxaCartao / 100);
-    const valorComissao = preco * (comissao / 100);
-    const valorMargem = preco * (margemReal / 100);
-    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxa - valorComissao;
-
-    const isValidMargem = margemContribuicao > 0;
-    const peUnidades = isValidMargem ? (valorRateadoCF / margemContribuicao) : Infinity;
 
     const projecaoReforma = motorReforma.projetar({
       cmv: p.cmv,
-      custoFixoUnitario,
-      impostoPercent: imposto,
-      despesasPercent: taxaCartao + comissao,
-      margemPercent: margemReal,
-      precoAtual: preco,
+      custoFixoUnitario: p.custoFixoUnitario,
+      impostoPercent: p.impostoPercent,
+      despesasPercent: p.despesasPercent,
+      margemPercent: p.margemReal,
+      precoAtual: p.preco,
     });
 
-    receitaTotal += preco * vendas;
-    margemTotal += margemContribuicao * vendas;
-    vendasTotais += vendas;
-    receitaTotalReforma += (motorReforma.precoMuda ? projecaoReforma.precoMantendoMargem : preco) * vendas;
+    receitaTotalReforma += (motorReforma.precoMuda ? projecaoReforma.precoMantendoMargem : p.preco) * vendas;
 
     dataGraficoTotal[0].value += p.cmv * vendas;
-    dataGraficoTotal[1].value += custoFixoUnitario * vendas;
-    dataGraficoTotal[2].value += valorImposto * vendas;
-    dataGraficoTotal[3].value += (valorTaxa + valorComissao) * vendas;
-    dataGraficoTotal[4].value += valorMargem * vendas;
+    dataGraficoTotal[1].value += p.custoFixoUnitario * vendas;
+    dataGraficoTotal[2].value += p.valorImposto * vendas;
+    dataGraficoTotal[3].value += p.valorDespesas * vendas;
+    dataGraficoTotal[4].value += p.valorMargem * vendas;
 
     return {
       ...p,
-      imposto,
-      taxaCartao,
-      comissao,
-      margem,
-      margemReal,
-      rateio,
+      imposto: p.imposto || 0,
+      taxaCartao: p.taxaCartao || 0,
+      comissao: p.comissao || 0,
+      margem: p.margem || 0,
+      rateio: p.percentualRateio || 0,
       vendas,
-      preco,
-      precoSugerido,
-      valorMargemSugerido,
-      custoFixoUnitario,
-      valorRateadoCF,
-      valorImposto,
-      valorTaxa,
-      valorComissao,
-      margemContribuicao,
-      valorMargem,
-      peUnidades,
-      isValidMargem,
-      semRateio: rateio === 0,
+      semRateio: (p.percentualRateio || 0) === 0,
       projecaoReforma,
     };
   });
 
-  const lucroMix = margemTotal - custoFixoTotal;
   const variacaoReceitaReforma = receitaTotal > 0 ? ((receitaTotalReforma - receitaTotal) / receitaTotal) * 100 : 0;
 
   const qtdSemRateio = processedProdutos.filter(p => p.semRateio).length;
@@ -272,6 +276,7 @@ export default function MixPrecoLote() {
     }
     if (filterMode === 'sem-rateio') list = list.filter(p => p.semRateio);
     if (filterMode === 'prejuizo') list = list.filter(p => !p.isValidMargem);
+    if (filterMode === 'rateio-ocioso') list = list.filter(p => p.rateioOcioso);
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validProdutos, custosFixos, searchTerm, filterMode]);
@@ -308,12 +313,32 @@ export default function MixPrecoLote() {
     currentPage * ITEMS_PER_PAGE
   );
 
-  const distribuirIgualmenteNow = () => {
+  // Só entra no rateio quem atinge o CMV mínimo E tem vendas projetadas.
+  //
+  // A exigência das vendas não é um detalhe: o custo fixo unitário é a cota
+  // dividida pelas unidades vendidas, então uma cota dada a um produto sem
+  // vendas não vira preço em lugar nenhum — ela some, e os 100% do rateio
+  // passam a cobrir menos que 100% do custo fixo.
+  const elegiveisParaRateio = () => {
     const limite = Number(minRateioValor) || 0;
-    const elegiveis = validProdutos.filter(p => p.cmv >= limite);
+    return validProdutos.filter(p => p.cmv >= limite && (p.vendasProjetadas || 0) > 0);
+  };
+
+  const avisarSemElegiveis = () => {
+    const limite = Number(minRateioValor) || 0;
+    const barradosPorVendas = validProdutos.filter(p => p.cmv >= limite && (p.vendasProjetadas || 0) <= 0).length;
+    alert(
+      barradosPorVendas > 0
+        ? "Nenhum produto pode receber rateio: os que atingem o custo mínimo estão sem vendas projetadas, e sem vendas a cota do custo fixo não entra no preço."
+        : "Nenhum produto atinge o valor mínimo para rateio."
+    );
+  };
+
+  const distribuirIgualmenteNow = () => {
+    const elegiveis = elegiveisParaRateio();
 
     if (elegiveis.length === 0) {
-      alert("Nenhum produto atinge o valor mínimo para rateio.");
+      avisarSemElegiveis();
       return;
     }
 
@@ -360,11 +385,11 @@ export default function MixPrecoLote() {
   const distribuirInteligentemente = (pesosAtuais: { vendas: number; receita: number; lucro: number }) => {
     if (validProdutos.length === 0) return;
 
-    const limite = Number(minRateioValor) || 0;
-    const elegiveis = processedProdutos.filter(p => p.cmv >= limite);
+    const idsElegiveis = new Set(elegiveisParaRateio().map(p => p.id));
+    const elegiveis = processedProdutos.filter(p => idsElegiveis.has(p.id));
 
     if (elegiveis.length === 0) {
-      alert("Nenhum produto atinge o valor mínimo para rateio.");
+      avisarSemElegiveis();
       return;
     }
 
@@ -462,7 +487,10 @@ export default function MixPrecoLote() {
   };
 
   const handleDistribuirPendenteEntreSemRateio = () => {
-    const semRateioIds = produtos.filter(p => (p.percentualRateio || 0) === 0).map(p => p.id);
+    // Mesma regra dos outros botões: sem vendas projetadas, a cota não vira preço.
+    const semRateioIds = produtos
+      .filter(p => (p.percentualRateio || 0) === 0 && (p.vendasProjetadas || 0) > 0)
+      .map(p => p.id);
     if (semRateioIds.length === 0 || rateioPendente <= 0) return;
     const fatia = rateioPendente / semRateioIds.length;
     const updated = produtos.map(p =>
@@ -475,29 +503,27 @@ export default function MixPrecoLote() {
   // guardando os valores individuais anteriores para permitir desfazer.
   const applyBulkNow = (field: BulkField) => {
     if (validProdutos.length === 0) return;
-    const meta = BULK_FIELD_META[field];
-    const value = bulkInputs[field];
+    const def = bulkFields.find(f => f.key === field);
+    if (!def) return;
+    const value = bulkInputs[field] || 0;
 
     setBulkSnapshots(prev => {
       if (prev[field]) return prev; // preserva o snapshot original enquanto a aplicação estiver ativa
       const snap: Record<string, number> = {};
-      produtos.forEach(p => { snap[p.id] = Number(p[meta.productKey]) || 0; });
+      produtos.forEach(p => { snap[p.id] = def.ler(p); });
       return { ...prev, [field]: snap };
     });
 
-    const updated = produtos.map(p => ({ ...p, [meta.productKey]: value }));
+    const updated = produtos.map(p => def.aplicar(p, value));
     setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
   };
 
   // Desfaz a aplicação em massa, restaurando os valores individuais que cada produto tinha antes.
   const handleRemoveBulk = (field: BulkField) => {
-    const meta = BULK_FIELD_META[field];
+    const def = bulkFields.find(f => f.key === field);
     const snap = bulkSnapshots[field];
-    if (!snap) return;
-    const updated = produtos.map(p => ({
-      ...p,
-      [meta.productKey]: snap[p.id] ?? p[meta.productKey],
-    }));
+    if (!def || !snap) return;
+    const updated = produtos.map(p => def.aplicar(p, snap[p.id] ?? def.ler(p)));
     setProdutos(updated); syncProdutos(updated).catch(err => console.error(err));
     setBulkSnapshots(prev => {
       const next = { ...prev };
@@ -522,28 +548,21 @@ export default function MixPrecoLote() {
       </div>
       <div className="flex gap-2">
          <button onClick={() => {
-            // Reaproveita os totais já calculados em processedProdutos/receitaTotal/margemTotal
-            // (os mesmos exibidos na tela), em vez de recalcular o preço com uma fórmula à parte
-            // — a antiga reimplementação aqui ignorava o custo fixo unitário rateado e por isso
-            // exportava números diferentes dos mostrados na tela.
-            const custosVariaveisTotais = processedProdutos.reduce((a, p) => a + (p.cmv || 0) * p.vendas, 0);
-            const despesasVariaveisTotal = processedProdutos.reduce((a, p) => a + (p.valorImposto + p.valorTaxa + p.valorComissao) * p.vendas, 0);
-            const percMargemContribuicao = receitaTotal > 0 ? (margemTotal / receitaTotal) : 0;
-            const pontoEquilibrioFaturamento = percMargemContribuicao > 0 ? (custoFixoTotal / percMargemContribuicao) : 0;
-
+            // Os mesmos totais que a tela mostra, vindos do mesmo cálculo —
+            // não há uma segunda fórmula aqui para divergir da primeira.
             const mcUnitMap: Record<string, number> = {};
-            processedProdutos.forEach(p => { mcUnitMap[p.id] = p.margemContribuicao; });
+            mix.produtos.forEach(p => { mcUnitMap[p.id] = p.margemContribuicao; });
 
             exportToExcel(
                false,
                produtos,
-               receitaTotal,
+               mix.receitaTotal,
                custoFixoTotal,
-               custosVariaveisTotais,
-               despesasVariaveisTotal,
-               margemTotal,
-               lucroMix,
-               pontoEquilibrioFaturamento,
+               mix.custosVariaveisTotais,
+               mix.impostoValorTotal + mix.despesasValorTotal,
+               mix.margemContribuicaoTotal,
+               mix.lucroLiquidoTotal,
+               mix.pontoEquilibrioFaturamento,
                mcUnitMap
             );
          }} className="px-3 py-1.5 bg-background border border-border rounded-md text-sm font-medium hover:bg-muted transition-colors flex items-center gap-2">
@@ -585,9 +604,10 @@ export default function MixPrecoLote() {
         </button>
 
         {isPadronizarOpen && (
-          <div className="p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {(Object.keys(BULK_FIELD_META) as BulkField[]).map(field => {
-            const meta = BULK_FIELD_META[field];
+          <div className="p-4 sm:p-6 space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {bulkFields.map(meta => {
+            const field = meta.key;
             const Icon = meta.icon;
             const applied = !!bulkSnapshots[field];
             const actionKey = `bulk-${field}`;
@@ -611,7 +631,7 @@ export default function MixPrecoLote() {
                   <div className="relative flex-1">
                     <input
                       type="number"
-                      value={bulkInputs[field]}
+                      value={bulkInputs[field] ?? 0}
                       onChange={(e) => setBulkInputs(prev => ({ ...prev, [field]: Number(e.target.value) }))}
                       className="w-full px-3 py-2 pr-7 border border-border rounded-lg bg-muted/20 text-sm font-medium focus:ring-2 focus:ring-primary/50"
                     />
@@ -644,6 +664,11 @@ export default function MixPrecoLote() {
               </div>
             );
           })}
+          </div>
+
+          <div className="pt-4 border-t border-border">
+            <DespesasVariaveisManager compacto />
+          </div>
         </div>
         )}
       </div>
@@ -768,7 +793,7 @@ export default function MixPrecoLote() {
                   { name: 'Custo Variável (CMV)', value: p.cmv },
                   { name: 'Custo Fixo Unitário', value: p.custoFixoUnitario },
                   { name: 'Impostos', value: p.valorImposto },
-                  { name: 'Taxas & Comissões', value: p.valorTaxa + p.valorComissao },
+                  { name: 'Taxas & Despesas', value: p.valorDespesas },
                   { name: 'Lucro Líquido', value: p.valorMargem },
                 ].map(item => ({ ...item, value: Number(item.value.toFixed(2)) }));
 
@@ -914,9 +939,24 @@ export default function MixPrecoLote() {
                                   <input type="number" value={p.taxaCartao} onChange={(e) => handleUpdateProduto(p.id, { taxaCartao: Number(e.target.value) })} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                                 </div>
                                 <div>
-                                  <label className="block text-xs font-medium text-muted-foreground mb-1">Outros (Comissão e afins) %</label>
+                                  <label className="block text-xs font-medium text-muted-foreground mb-1">Comissão (%)</label>
                                   <input type="number" value={p.comissao} onChange={(e) => handleUpdateProduto(p.id, { comissao: Number(e.target.value) })} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
                                 </div>
+                                {despesasVariaveis.map(d => (
+                                  <div key={d.id}>
+                                    <label className="block text-xs font-medium text-muted-foreground mb-1 truncate" title={d.nome}>
+                                      {d.nome} (%)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={p.despesasVariaveis?.[d.id] ?? 0}
+                                      onChange={(e) => handleUpdateProduto(p.id, {
+                                        despesasVariaveis: { ...(p.despesasVariaveis || {}), [d.id]: Number(e.target.value) },
+                                      })}
+                                      className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm"
+                                    />
+                                  </div>
+                                ))}
                                 <div>
                                   {(!p.modoPrecificacao || p.modoPrecificacao === 'margem') ? (
                                     <>
@@ -1092,6 +1132,44 @@ export default function MixPrecoLote() {
                     </div>
                   )}
 
+                  {/* O rateio pode fechar 100% e mesmo assim sobrar custo fixo
+                      fora dos preços: a cota de um produto sem vendas
+                      projetadas é dividida por zero unidades e não entra em
+                      preço nenhum. Era o que deixava esta barra verde enquanto
+                      o Dashboard fechava no vermelho. */}
+                  {mix.custoFixoNaoAbsorvido > 0 && (
+                    <div className="mb-3 p-2.5 bg-red-50 border border-red-200 rounded text-xs text-red-800">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        {formatCurrency(mix.custoFixoNaoAbsorvido)} de custo fixo fora dos preços
+                      </p>
+                      <p className="mt-1 leading-relaxed">
+                        {mix.produtosComRateioOcioso.length === 1
+                          ? <>O produto <strong>{mix.produtosComRateioOcioso[0].nome}</strong> tem rateio mas nenhuma venda projetada, então a cota dele não entra em preço nenhum.</>
+                          : <>{mix.produtosComRateioOcioso.length} produtos têm rateio mas nenhuma venda projetada, então a cota deles não entra em preço nenhum.</>}
+                        {' '}Projete as vendas ou zere o rateio desses itens.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => { setFilterMode('rateio-ocioso'); setCurrentPage(1); }}
+                        className="mt-2 font-semibold underline underline-offset-2 hover:text-red-900"
+                      >
+                        Ver {mix.produtosComRateioOcioso.length === 1 ? 'o produto' : 'os produtos'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Reconciliação entre esta tela e o Dashboard: enquanto
+                      sobrar custo fixo descoberto, a soma das margens "no alvo"
+                      de cada produto é maior que o lucro real da empresa. */}
+                  {mix.custoFixoDescoberto > 0 && (
+                    <p className="mb-3 text-[10px] text-muted-foreground leading-relaxed">
+                      Os preços de hoje embutem {formatCurrency(mix.custoFixoAbsorvido)} dos{' '}
+                      {formatCurrency(custoFixoTotal)} de custo fixo. Os{' '}
+                      {formatCurrency(mix.custoFixoDescoberto)} restantes saem direto do resultado.
+                    </p>
+                  )}
+
                   <div className="flex flex-col gap-2 mt-4 border-t border-border pt-4">
                     <div className="flex flex-col gap-1.5 mb-1 p-2.5 bg-muted/20 rounded-md border border-border">
                       <span className="text-xs font-medium text-muted-foreground">Não ratear produtos com Custo (CMV) abaixo de:</span>
@@ -1118,7 +1196,7 @@ export default function MixPrecoLote() {
                           ? 'border-amber-400 bg-amber-500 text-white'
                           : 'border-border bg-background hover:bg-muted/50'
                       }`}
-                      title="Divide 100% igualmente entre todos os produtos que atingirem o custo mínimo"
+                      title="Divide 100% igualmente entre os produtos que atingirem o custo mínimo e tiverem vendas projetadas"
                     >
                       <Wand2 className="w-3.5 h-3.5" />
                       {confirmingAction === 'distribuir-igual' ? 'Confirmar?' : 'Distribuir igual'}

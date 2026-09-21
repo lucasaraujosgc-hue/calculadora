@@ -12,8 +12,8 @@ import crypto from "crypto";
 import { db } from "./src/db/index.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots, store,
-  fiscalDocuments, fiscalItems, fiscalProductLinks } from "./src/db/schema.js";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+  fiscalDocuments, fiscalItems, fiscalProductLinks, variableExpenses } from "./src/db/schema.js";
+import { eq, and, gte, lte, desc, asc, inArray } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import multer from "multer";
@@ -589,6 +589,105 @@ app.put("/api/me", requireUser, async (req: any, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Despesas variáveis personalizadas
+// ---------------------------------------------------------------------------
+//
+// Cada empresa tem as suas: uma paga frete, outra paga taxa de marketplace,
+// outra embala presente. Antes tudo isso ia para o campo único "Outros", que
+// somava no preço sem dizer de onde vinha.
+//
+// Toda rota aqui filtra por `userId` na consulta E na cláusula de escrita, então
+// a lista de um usuário é invisível — e inalterável — para qualquer outro. Um
+// id de despesa de outra conta simplesmente não encontra linha para atualizar.
+
+const NOME_DESPESA_MAX = 40;
+
+function nomeDespesaValido(valor: unknown): string | null {
+  if (typeof valor !== "string") return null;
+  const nome = valor.trim().replace(/\s+/g, " ");
+  if (!nome || nome.length > NOME_DESPESA_MAX) return null;
+  return nome;
+}
+
+function mapearDespesa(d: typeof variableExpenses.$inferSelect) {
+  return { id: d.id, nome: d.name, posicao: d.position };
+}
+
+app.get("/api/variable-expenses", requireUser, async (req: any, res) => {
+  const lista = await db.select().from(variableExpenses)
+    .where(eq(variableExpenses.userId, req.currentUser.id))
+    .orderBy(asc(variableExpenses.position), asc(variableExpenses.createdAt));
+  res.json(lista.map(mapearDespesa));
+});
+
+app.post("/api/variable-expenses", requireUser, async (req: any, res) => {
+  const nome = nomeDespesaValido(req.body?.nome ?? req.body?.name);
+  if (!nome) {
+    return res.status(400).json({ error: `Informe um nome de até ${NOME_DESPESA_MAX} caracteres.` });
+  }
+
+  const existentes = await db.select().from(variableExpenses)
+    .where(eq(variableExpenses.userId, req.currentUser.id));
+
+  // Um teto por usuário: cada despesa vira uma coluna no Mix, e além disso a
+  // tabela deixa de caber na tela.
+  if (existentes.length >= 12) {
+    return res.status(400).json({ error: "Você já tem 12 despesas variáveis. Remova alguma para criar outra." });
+  }
+  if (existentes.some(d => d.name.toLowerCase() === nome.toLowerCase())) {
+    return res.status(409).json({ error: `Você já tem uma despesa chamada "${nome}".` });
+  }
+
+  const [criada] = await db.insert(variableExpenses).values({
+    userId: req.currentUser.id,
+    name: nome,
+    position: existentes.length,
+  }).returning();
+
+  res.json({ success: true, despesa: mapearDespesa(criada) });
+});
+
+app.put("/api/variable-expenses/:id", requireUser, async (req: any, res) => {
+  const nome = nomeDespesaValido(req.body?.nome ?? req.body?.name);
+  if (!nome) {
+    return res.status(400).json({ error: `Informe um nome de até ${NOME_DESPESA_MAX} caracteres.` });
+  }
+
+  const conflito = await db.select().from(variableExpenses)
+    .where(eq(variableExpenses.userId, req.currentUser.id));
+  if (conflito.some(d => d.id !== req.params.id && d.name.toLowerCase() === nome.toLowerCase())) {
+    return res.status(409).json({ error: `Você já tem uma despesa chamada "${nome}".` });
+  }
+
+  const atualizada = await db.update(variableExpenses)
+    .set({ name: nome, updatedAt: new Date() })
+    .where(and(
+      eq(variableExpenses.id, req.params.id as any),
+      eq(variableExpenses.userId, req.currentUser.id),
+    )).returning();
+
+  if (atualizada.length === 0) return res.status(404).json({ error: "Despesa não encontrada" });
+  res.json({ success: true, despesa: mapearDespesa(atualizada[0]) });
+});
+
+app.delete("/api/variable-expenses/:id", requireUser, async (req: any, res) => {
+  // Os percentuais gravados em cada produto ficam onde estão: sem a definição,
+  // o motor de preço já para de somá-los, e recriar a despesa com o mesmo id
+  // não é possível — mas manter o dado evita perder tudo por um clique errado
+  // quando a exclusão é desfeita pelo banco.
+  const removidas = await db.delete(variableExpenses).where(and(
+    eq(variableExpenses.id, req.params.id as any),
+    eq(variableExpenses.userId, req.currentUser.id),
+  )).returning({ id: variableExpenses.id });
+
+  // Sem linha apagada, o id não é deste usuário (ou já não existe). Responder
+  // "sucesso" aqui faria a tela de quem tentou apagar a despesa de outra conta
+  // remover o item da lista dela como se tivesse funcionado.
+  if (removidas.length === 0) return res.status(404).json({ error: "Despesa não encontrada" });
+  res.json({ success: true });
+});
+
 app.get("/api/fixed-costs", requireUser, async (req: any, res) => {
   const costs = await db.select().from(fixedCosts).where(eq(fixedCosts.userId, req.currentUser.id));
   res.json(costs.map(c => ({
@@ -708,9 +807,14 @@ async function checkProductLimit(req: any, res: any, next: any) {
   next();
 }
 
-app.get("/api/products", requireUser, async (req: any, res) => {
-  const myProducts = await db.select().from(products).where(eq(products.userId, req.currentUser.id));
-  res.json(myProducts.map(p => ({
+/**
+ * Forma como o produto trafega para o cliente. Existe uma vez só porque as
+ * quatro rotas de produto devolviam recortes diferentes do mesmo registro — e a
+ * do PUT devolvia menos campos do que a do GET, fazendo a tela perder valores
+ * depois de salvar.
+ */
+function mapearProduto(p: typeof products.$inferSelect) {
+  return {
     id: p.id,
     nome: p.name,
     cmv: p.costPrice,
@@ -724,40 +828,115 @@ app.get("/api/products", requireUser, async (req: any, res) => {
     precoFixo: p.precoFixo || 0,
     percentualRateio: p.percentualRateio || 0,
     modoPrecificacao: p.modoPrecificacao || 'margem',
-    isSample: p.isSample
-  })));
+    despesasVariaveis: (p.despesasVariaveis as Record<string, number>) || {},
+    isSample: p.isSample,
+  };
+}
+
+/**
+ * Campos graváveis de um produto, a partir do corpo da requisição.
+ *
+ * `salePrice` é o preço de venda do cadastro e `precoFixo` é o preço que o
+ * usuário travou na tela de precificação. São coisas diferentes: o sync antigo
+ * gravava `precoFixo ?? precoVenda` em `salePrice`, e como `??` só cai para o
+ * próximo em null/undefined, todo produto no modo 'margem' (precoFixo = 0)
+ * tinha o preço de cadastro zerado no primeiro sync — o que desabilitava de vez
+ * o botão "Restaurar valor de venda do cadastro".
+ */
+function camposDoProduto(body: any) {
+  const despesas = body.despesasVariaveis;
+  return {
+    name: body.nome ?? body.name ?? "Novo Produto",
+    costPrice: Number(body.cmv ?? body.custo ?? body.costPrice ?? 0) || 0,
+    salePrice: Number(body.precoVenda ?? body.salePrice ?? 0) || 0,
+    projectedSales: Number(body.vendasProjetadas ?? body.projectedSales ?? 0) || 0,
+    imposto: Number(body.imposto ?? 0) || 0,
+    taxaCartao: Number(body.taxaCartao ?? 0) || 0,
+    comissao: Number(body.comissao ?? 0) || 0,
+    margem: Number(body.margem ?? 0) || 0,
+    precoIdeal: Number(body.precoIdeal ?? 0) || 0,
+    precoFixo: Number(body.precoFixo ?? 0) || 0,
+    percentualRateio: Number(body.percentualRateio ?? 0) || 0,
+    modoPrecificacao: body.modoPrecificacao === 'preco' ? 'preco' : 'margem',
+    despesasVariaveis: (despesas && typeof despesas === 'object' && !Array.isArray(despesas))
+      ? despesas as Record<string, number>
+      : {},
+  };
+}
+
+app.get("/api/products", requireUser, async (req: any, res) => {
+  // Ordem explícita: sem ela o Postgres devolve na ordem física das linhas, e a
+  // lista do usuário embaralhava a cada reload.
+  const myProducts = await db.select().from(products)
+    .where(eq(products.userId, req.currentUser.id))
+    .orderBy(asc(products.createdAt), asc(products.id));
+  res.json(myProducts.map(mapearProduto));
 });
 
+/**
+ * Salva o mix inteiro de uma vez, vindo da tela de Preços em Lote.
+ *
+ * A versão anterior apagava TODOS os produtos do usuário e reinseria a lista.
+ * Isso gerava um id novo para cada produto a cada salvamento, enquanto o
+ * cliente seguia com os ids antigos em memória — cliente e banco divergiam no
+ * primeiro caractere digitado, e qualquer coisa que referenciasse produto por
+ * id passava a apontar para o vazio no reload seguinte. Além disso, duas
+ * digitações próximas disparavam dois delete-all concorrentes sobre a mesma
+ * tabela.
+ *
+ * Agora é uma conciliação: atualiza quem já existe (mantendo o id), insere quem
+ * é novo e remove só o que sumiu da lista.
+ */
 app.post("/api/products/sync", requireUser, async (req: any, res) => {
   try {
     const incomingProducts = req.body;
     if (!Array.isArray(incomingProducts)) {
       return res.status(400).json({ error: "Invalid data format" });
     }
-    
+
+    const userId = req.currentUser.id;
+
     await db.transaction(async (tx: any) => {
-      await tx.delete(products).where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
-      
+      const existentes = await tx.select({ id: products.id }).from(products)
+        .where(and(eq(products.userId, userId), eq(products.isSample, false)));
+      const idsExistentes = new Set<string>(existentes.map((p: any) => String(p.id)));
+
+      const idsMantidos = new Set<string>();
+
       for (const p of incomingProducts) {
-        await tx.insert(products).values({
-          userId: req.currentUser.id,
-          name: p.nome || p.name,
-          costPrice: p.cmv ?? p.custo ?? p.costPrice ?? 0,
-          salePrice: p.precoFixo ?? p.precoVenda ?? p.salePrice ?? 0,
-          projectedSales: p.vendasProjetadas ?? p.projectedSales ?? 0,
-          imposto: p.imposto ?? 0,
-          taxaCartao: p.taxaCartao ?? 0,
-          comissao: p.comissao ?? 0,
-          margem: p.margem ?? 0,
-          precoIdeal: p.precoIdeal ?? 0,
-          precoFixo: p.precoFixo ?? 0,
-          percentualRateio: p.percentualRateio ?? 0,
-          modoPrecificacao: p.modoPrecificacao ?? 'margem',
-          isSample: false
-        });
+        const campos = camposDoProduto(p);
+        const id = typeof p?.id === "string" ? p.id : null;
+
+        if (id && idsExistentes.has(id)) {
+          idsMantidos.add(id);
+          await tx.update(products)
+            .set({ ...campos, updatedAt: new Date() })
+            .where(and(eq(products.id, id), eq(products.userId, userId)));
+          continue;
+        }
+
+        // Produto que ainda não existe no banco (criado offline, ou vindo do
+        // modo visitante depois do login). O id local não serve como id do
+        // banco, então nasce um novo e a resposta devolve a lista conciliada
+        // para o cliente adotar os ids de verdade.
+        const [criado] = await tx.insert(products)
+          .values({ userId, ...campos, isSample: false })
+          .returning({ id: products.id });
+        idsMantidos.add(criado.id);
+      }
+
+      const removidos: string[] = [...idsExistentes].filter(id => !idsMantidos.has(id));
+      if (removidos.length > 0) {
+        await tx.delete(products)
+          .where(and(eq(products.userId, userId), inArray(products.id, removidos)));
       }
     });
-    res.json({ success: true });
+
+    const atualizados = await db.select().from(products)
+      .where(eq(products.userId, userId))
+      .orderBy(asc(products.createdAt), asc(products.id));
+
+    res.json({ success: true, products: atualizados.map(mapearProduto) });
   } catch (error) {
     res.status(500).json({ error: "Erro ao sincronizar produtos" });
   }
@@ -766,50 +945,18 @@ app.post("/api/products/sync", requireUser, async (req: any, res) => {
 app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) => {
   const newProduct = await db.insert(products).values({
     userId: req.currentUser.id,
-    name: req.body.nome || req.body.name || "Novo Produto",
-    costPrice: req.body.cmv || req.body.costPrice || req.body.custo || 0,
-    salePrice: req.body.precoVenda || req.body.salePrice || 0,
-    projectedSales: req.body.vendasProjetadas || req.body.projectedSales || 0,
+    ...camposDoProduto(req.body),
     isSample: false
   }).returning();
-  
-  const p = newProduct[0];
-  res.json({ success: true, product: {
-    id: p.id,
-    nome: p.name,
-    cmv: p.costPrice,
-    precoVenda: p.salePrice,
-    vendasProjetadas: p.projectedSales,
-    isSample: p.isSample
-  }});
+
+  res.json({ success: true, product: mapearProduto(newProduct[0]) });
 });
 app.put("/api/products/:id", requireUser, async (req: any, res) => {
   const updated = await db.update(products)
-    .set({
-      name: req.body.nome || req.body.name,
-      costPrice: req.body.cmv ?? req.body.costPrice,
-      salePrice: req.body.precoFixo ?? req.body.precoVenda ?? req.body.salePrice,
-      projectedSales: req.body.vendasProjetadas ?? req.body.projectedSales,
-      imposto: req.body.imposto ?? 0,
-      taxaCartao: req.body.taxaCartao ?? 0,
-      comissao: req.body.comissao ?? 0,
-      margem: req.body.margem ?? 0,
-      precoIdeal: req.body.precoIdeal ?? 0,
-      precoFixo: req.body.precoFixo ?? 0,
-      percentualRateio: req.body.percentualRateio ?? 0,
-      modoPrecificacao: req.body.modoPrecificacao ?? 'margem'
-    })
+    .set({ ...camposDoProduto(req.body), updatedAt: new Date() })
     .where(and(eq(products.id, req.params.id as any), eq(products.userId, req.currentUser.id))).returning();
   if (updated.length > 0) {
-    const p = updated[0];
-    res.json({ success: true, product: {
-      id: p.id,
-      nome: p.name,
-      cmv: p.costPrice,
-      precoVenda: p.salePrice,
-      vendasProjetadas: p.projectedSales,
-      isSample: p.isSample
-    }});
+    res.json({ success: true, product: mapearProduto(updated[0]) });
   } else res.status(404).json({ error: "Produto não encontrado" });
 });
 app.delete("/api/products/:id", requireUser, async (req: any, res) => {

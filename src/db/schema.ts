@@ -38,10 +38,40 @@ export const products = pgTable('products', {
   precoFixo: doublePrecision('preco_fixo').default(0),
   percentualRateio: doublePrecision('percentual_rateio').default(0),
   modoPrecificacao: text('modo_precificacao').default('margem'),
+  /**
+   * Percentuais das despesas variáveis que o próprio usuário criou, no formato
+   * { [id da despesa]: percentual }. Fica em JSONB, e não numa tabela de
+   * ligação, porque é sempre lido junto com o produto e nunca consultado
+   * isoladamente — e porque assim o /api/products/sync continua sendo uma
+   * escrita só por produto.
+   */
+  despesasVariaveis: jsonb('despesas_variaveis').default({}).notNull(),
   isSample: boolean('is_sample').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+/**
+ * Despesas variáveis que cada usuário cria para si (ex.: "Frete", "Embalagem",
+ * "Marketplace"), no lugar do antigo campo único "Outros".
+ *
+ * É estritamente por usuário: a linha carrega o `userId` e toda consulta filtra
+ * por ele, então uma despesa criada por uma empresa não aparece — nem entra no
+ * preço — de nenhuma outra. O nome é único por usuário para não haver dois
+ * "Frete" na mesma tela.
+ */
+export const variableExpenses = pgTable('variable_expenses', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  name: text('name').notNull(),
+  /** Ordem de exibição, para o usuário arrumar as colunas do Mix. */
+  position: integer('position').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  nomeUnicoPorUsuario: unique('variable_expenses_user_name_key').on(t.userId, t.name),
+  porUsuario: index('variable_expenses_user_idx').on(t.userId),
+}));
 
 export const fixedCosts = pgTable('fixed_costs', {
   id: uuid('id').defaultRandom().primaryKey(),
