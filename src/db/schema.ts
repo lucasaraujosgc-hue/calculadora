@@ -99,6 +99,14 @@ export const pricingStrategies = pgTable('pricing_strategies', {
   name: text('name').notNull(),
   /** Margem líquida alvo, em pontos percentuais (20 = 20%). */
   margem: doublePrecision('margem').default(0).notNull(),
+  /**
+   * Margem mínima aceitável desta faixa, em pontos percentuais.
+   *
+   * Não mexe no preço sugerido — esse já entrega a margem alvo. Serve para o
+   * momento em que alguém digita um preço à mão ou dá desconto: abaixo do piso,
+   * a tela avisa. 0 significa "sem piso".
+   */
+  piso: doublePrecision('piso').default(0).notNull(),
   /** Cor do selo na tabela do Mix, para bater o olho e enxergar o mix. */
   cor: text('cor').default('slate').notNull(),
   position: integer('position').default(0).notNull(),

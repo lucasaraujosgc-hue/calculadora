@@ -37,6 +37,8 @@ export type EstrategiaItem = {
   id: string;
   nome: string;
   margem: number;
+  /** Margem mínima aceitável; 0 = sem piso. */
+  piso?: number;
   cor?: string;
   posicao?: number;
 };
@@ -96,7 +98,7 @@ type AppContextType = {
 
   estrategias: EstrategiaItem[];
   addEstrategia: (nome: string, margem: number) => Promise<void>;
-  updateEstrategia: (id: string, patch: { nome?: string; margem?: number }) => Promise<void>;
+  updateEstrategia: (id: string, patch: { nome?: string; margem?: number; piso?: number }) => Promise<void>;
   removeEstrategia: (id: string) => Promise<void>;
   snapshots: SnapshotItem[];
   fetchSnapshots: () => Promise<void>;
@@ -160,10 +162,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // As três faixas com que toda conta começa — as mesmas que o servidor semeia
   // no primeiro acesso, repetidas aqui para o modo visitante nascer igual.
   const estrategiasPadrao: EstrategiaItem[] = [
-    { id: 'estrategia-sem-margem', nome: 'Sem margem', margem: 0, cor: 'rose', posicao: 0 },
-    { id: 'estrategia-atracao', nome: 'Atração', margem: 10, cor: 'sky', posicao: 1 },
-    { id: 'estrategia-padrao', nome: 'Padrão', margem: 20, cor: 'slate', posicao: 2 },
-    { id: 'estrategia-alta', nome: 'Margem alta', margem: 30, cor: 'emerald', posicao: 3 },
+    { id: 'estrategia-sem-margem', nome: 'Sem margem', margem: 0, piso: 0, cor: 'rose', posicao: 0 },
+    { id: 'estrategia-atracao', nome: 'Atração', margem: 10, piso: 5, cor: 'sky', posicao: 1 },
+    { id: 'estrategia-padrao', nome: 'Padrão', margem: 20, piso: 0, cor: 'slate', posicao: 2 },
+    { id: 'estrategia-alta', nome: 'Margem alta', margem: 30, piso: 0, cor: 'emerald', posicao: 3 },
   ];
 
   const [estrategias, setEstrategias] = useState<EstrategiaItem[]>(() => {
@@ -324,12 +326,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } else {
       setEstrategias(prev => [
         ...prev,
-        { id: crypto.randomUUID(), nome, margem, cor: 'slate', posicao: prev.length }
+        { id: crypto.randomUUID(), nome, margem, piso: 0, cor: 'slate', posicao: prev.length }
       ]);
     }
   };
 
-  const updateEstrategia = async (id: string, patch: { nome?: string; margem?: number }) => {
+  const updateEstrategia = async (id: string, patch: { nome?: string; margem?: number; piso?: number }) => {
     const nome = patch.nome !== undefined ? patch.nome.trim().replace(/\s+/g, ' ') : undefined;
     if (nome !== undefined && !nome) throw new Error('Dê um nome para a estratégia.');
     if (nome !== undefined && estrategias.some(e => e.id !== id && e.nome.toLowerCase() === nome.toLowerCase())) {
@@ -339,11 +341,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw new Error('A margem precisa ficar entre 0% e 99%.');
     }
 
+    const atual = estrategias.find(e => e.id === id);
+    const margemFinal = patch.margem ?? atual?.margem ?? 0;
+    if (patch.piso !== undefined && (!Number.isFinite(patch.piso) || patch.piso < 0 || patch.piso > margemFinal)) {
+      throw new Error('O piso precisa ficar entre 0% e a margem alvo da estratégia.');
+    }
+    // Baixar a margem abaixo do piso arrasta o piso junto, senão a faixa nasce
+    // violando o próprio limite.
+    const pisoFinal = patch.piso !== undefined
+      ? patch.piso
+      : (patch.margem !== undefined && (atual?.piso ?? 0) > margemFinal ? margemFinal : undefined);
+
     if (user && !isGuest) {
       const res = await fetch(`/api/pricing-strategies/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...patch, nome })
+        body: JSON.stringify({ ...patch, nome, piso: pisoFinal })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao salvar a estratégia');
@@ -352,6 +365,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...e,
       ...(nome !== undefined ? { nome } : {}),
       ...(patch.margem !== undefined ? { margem: patch.margem } : {}),
+      ...(pisoFinal !== undefined ? { piso: pisoFinal } : {}),
     } : e)));
   };
 

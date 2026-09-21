@@ -283,3 +283,69 @@ describe('estratégias de margem no cálculo', () => {
     expect(r.margemReal).toBeCloseTo(35, 6); // 100 - 50 - 15% de 100 = 35
   });
 });
+
+describe('piso de margem', () => {
+  const COM_PISO: EstrategiaDef = { id: 'e9', nome: 'Atração', margem: 10, piso: 5 };
+  const produto: ProdutoCalculo = {
+    id: 'p1', cmv: 50, vendasProjetadas: 100, percentualRateio: 0,
+    imposto: 10, estrategiaId: 'e9',
+  };
+
+  it('o preço sugerido não é afetado pelo piso — ele já entrega a margem alvo', () => {
+    const r = calcularProduto(produto, 0, [], [COM_PISO]);
+    expect(r.margemReal).toBe(10);
+    expect(r.abaixoDoPiso).toBe(false);
+  });
+
+  it('calcula o menor preço que ainda respeita o piso', () => {
+    const r = calcularProduto(produto, 0, [], [COM_PISO]);
+    // 50 / (1 - 0,10 imposto - 0,05 piso) = 58,82
+    expect(r.precoMinimo).toBeCloseTo(58.82, 2);
+    expect(r.precoMinimo!).toBeLessThan(r.preco);
+  });
+
+  it('acusa o preço digitado à mão que fura o piso', () => {
+    const r = calcularProduto(
+      { ...produto, modoPrecificacao: 'preco', precoFixo: 56 }, 0, [], [COM_PISO]
+    );
+    expect(r.abaixoDoPiso).toBe(true);
+    expect(r.margemReal).toBeLessThan(5);
+  });
+
+  it('não acusa o preço que fica exatamente no piso', () => {
+    const r = calcularProduto(produto, 0, [], [COM_PISO]);
+    const noPiso = calcularProduto(
+      { ...produto, modoPrecificacao: 'preco', precoFixo: r.precoMinimo! }, 0, [], [COM_PISO]
+    );
+    expect(noPiso.abaixoDoPiso).toBe(false);
+  });
+
+  it('faixa sem piso não acusa nada, por mais baixo que seja o preço', () => {
+    const semPiso: EstrategiaDef = { id: 'e9', nome: 'Atração', margem: 10 };
+    const r = calcularProduto(
+      { ...produto, modoPrecificacao: 'preco', precoFixo: 1 }, 0, [], [semPiso]
+    );
+    expect(r.pisoPercent).toBe(0);
+    expect(r.precoMinimo).toBeNull();
+    expect(r.abaixoDoPiso).toBe(false);
+  });
+
+  it('produto Personalizado não tem piso — ele não segue faixa nenhuma', () => {
+    const r = calcularProduto(
+      { ...produto, estrategiaId: null, margem: 10, modoPrecificacao: 'preco', precoFixo: 51 },
+      0, [], [COM_PISO]
+    );
+    expect(r.abaixoDoPiso).toBe(false);
+  });
+
+  it('o mix junta quem está abaixo do piso', () => {
+    const mix = calcularMix(
+      [
+        { id: 'ok', cmv: 50, vendasProjetadas: 10, estrategiaId: 'e9' },
+        { id: 'furado', cmv: 50, vendasProjetadas: 10, estrategiaId: 'e9', modoPrecificacao: 'preco', precoFixo: 52 },
+      ],
+      0, [], [COM_PISO]
+    );
+    expect(mix.produtosAbaixoDoPiso.map(p => p.id)).toEqual(['furado']);
+  });
+});

@@ -127,6 +127,14 @@ export default function EstrategiasManager({ compacto = false }: { compacto?: bo
         </p>
       </div>
 
+      <div className="flex items-center gap-2 px-3 mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="w-2 shrink-0" />
+        <span className="flex-1 min-w-0">Faixa</span>
+        <span className="shrink-0 w-[72px] text-center">Margem</span>
+        <span className="shrink-0 w-[72px] text-center" title="A menor margem que você aceita nesta faixa">Piso</span>
+        <span className="shrink-0 w-[62px]" />
+      </div>
+
       <ul className="space-y-1.5 mb-3">
         {estrategias.map(e => {
           const c = coresDaEstrategia(e.cor);
@@ -185,8 +193,21 @@ export default function EstrategiasManager({ compacto = false }: { compacto?: bo
                       min={0}
                       max={99}
                       onChange={ev => void executar(() => updateEstrategia(e.id, { margem: Number(ev.target.value) }))}
-                      title="Margem alvo desta faixa"
+                      title="Margem alvo desta faixa — é ela que forma o preço sugerido"
                       className="w-full pl-2 pr-5 py-1 border border-border rounded bg-muted/20 text-sm font-semibold text-center focus:ring-2 focus:ring-primary/50"
+                    />
+                    <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">%</span>
+                  </div>
+
+                  <div className="relative shrink-0 w-[72px]">
+                    <input
+                      type="number"
+                      value={e.piso ?? 0}
+                      min={0}
+                      max={e.margem}
+                      onChange={ev => void executar(() => updateEstrategia(e.id, { piso: Number(ev.target.value) }))}
+                      title="Piso: a menor margem que você aceita nesta faixa. Não muda o preço sugerido — avisa quando um preço digitado à mão fura o limite. 0 = sem piso."
+                      className="w-full pl-2 pr-5 py-1 border border-dashed border-border rounded bg-background text-sm text-center text-muted-foreground focus:ring-2 focus:ring-primary/50"
                     />
                     <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">%</span>
                   </div>
@@ -239,6 +260,7 @@ export default function EstrategiasManager({ compacto = false }: { compacto?: bo
             value={novaMargem}
             onChange={e => setNovaMargem(e.target.value)}
             placeholder="25"
+            title="Margem alvo da nova faixa (o piso começa em 0 e pode ser ajustado depois)"
             className="w-full pl-3 pr-6 py-2 border border-border rounded-lg bg-background text-sm focus:ring-2 focus:ring-primary/50"
           />
           <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>

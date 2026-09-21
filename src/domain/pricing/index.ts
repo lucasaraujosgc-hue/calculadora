@@ -32,6 +32,8 @@ export interface EstrategiaDef {
   nome: string;
   /** Margem líquida alvo, em pontos percentuais. */
   margem: number;
+  /** Margem mínima aceitável. 0 (ou ausente) significa "sem piso". */
+  piso?: number;
 }
 
 /**
@@ -144,6 +146,15 @@ export interface ResultadoProduto {
   peUnidades: number;
   /** Margem alvo em vigor, venha da estratégia ou do próprio produto. */
   margemAlvo: number;
+  /** Piso de margem da faixa; 0 quando não há faixa ou a faixa não define piso. */
+  pisoPercent: number;
+  /**
+   * Menor preço que ainda respeita o piso. `null` quando não há piso.
+   * É o número que falta na hora de negociar um desconto.
+   */
+  precoMinimo: number | null;
+  /** O preço em vigor entrega menos que o piso da faixa. */
+  abaixoDoPiso: boolean;
   /** A faixa que o produto segue, ou null quando é Personalizado. */
   estrategia: EstrategiaDef | null;
   /** A margem de contribuição é positiva — o produto ajuda a pagar as contas. */
@@ -199,6 +210,13 @@ export function calcularProduto(
     margemReal = preco > 0 ? (lucroReais / preco) * 100 : 0;
   }
 
+  // O piso só morde quando alguém foge do preço calculado: o preço sugerido já
+  // entrega a margem alvo, que nunca é menor que o piso (o cadastro valida).
+  const pisoPercent = estrategia?.piso && estrategia.piso > 0 ? estrategia.piso : 0;
+  const precoMinimo = pisoPercent > 0
+    ? calculateSellingPrice(p.cmv, custoFixoUnitario, impostoPercent / 100, despesasPercent / 100, 0, pisoPercent / 100)
+    : null;
+
   const valorImposto = preco * (impostoPercent / 100);
   const valorDespesas = preco * (despesasPercent / 100);
   const valorMargem = preco * (margemReal / 100);
@@ -222,6 +240,10 @@ export function calcularProduto(
     margemContribuicao,
     peUnidades: isValidMargem ? valorRateadoCF / margemContribuicao : Infinity,
     margemAlvo: margem,
+    pisoPercent,
+    precoMinimo,
+    // Uma diferença de centésimo de ponto é arredondamento, não violação.
+    abaixoDoPiso: pisoPercent > 0 && preco > 0 && margemReal < pisoPercent - 0.005,
     estrategia,
     isValidMargem,
     rateioOcioso: rateio > 0 && vendas <= 0,
@@ -258,6 +280,8 @@ export interface ResultadoMix<T extends ProdutoCalculo = ProdutoCalculo> {
   custoFixoNaoAbsorvido: number;
   /** Produtos que seguram esse rateio ocioso. */
   produtosComRateioOcioso: (T & ResultadoProduto)[];
+  /** Produtos cujo preço aplicado entrega menos que o piso da faixa deles. */
+  produtosAbaixoDoPiso: (T & ResultadoProduto)[];
   /** O custo fixo que os preços de fato embutem. */
   custoFixoAbsorvido: number;
   /** Custo fixo que nenhum preço cobre, pelos dois motivos somados. */
@@ -328,6 +352,7 @@ export function calcularMix<T extends ProdutoCalculo>(
     custoFixoNaoRateado: arredondar(custoFixoTotal - custoFixoRateado),
     custoFixoNaoAbsorvido: arredondar(custoFixoRateado - custoFixoAbsorvido),
     produtosComRateioOcioso: calculados.filter(p => p.rateioOcioso),
+    produtosAbaixoDoPiso: calculados.filter(p => p.abaixoDoPiso),
     custoFixoAbsorvido,
     custoFixoDescoberto: arredondar(custoFixoTotal - custoFixoAbsorvido),
   };

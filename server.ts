@@ -622,14 +622,16 @@ const MAX_ESTRATEGIAS = 8;
 const ESTRATEGIAS_PADRAO = [
   // 0% existe para o caso de venda a preço de custo (brinde, item de combo,
   // queima de estoque) sem obrigar o usuário a cair em "Personalizado".
-  { name: "Sem margem", margem: 0, cor: "rose" },
-  { name: "Atração", margem: 10, cor: "sky" },
-  { name: "Padrão", margem: 20, cor: "slate" },
-  { name: "Margem alta", margem: 30, cor: "emerald" },
+  { name: "Sem margem", margem: 0, piso: 0, cor: "rose" },
+  // O piso só vem preenchido na faixa de atração: é lá que o desconto costuma
+  // ir longe demais. Nas outras nasce zerado, para o usuário decidir.
+  { name: "Atração", margem: 10, piso: 5, cor: "sky" },
+  { name: "Padrão", margem: 20, piso: 0, cor: "slate" },
+  { name: "Margem alta", margem: 30, piso: 0, cor: "emerald" },
 ];
 
 function mapearEstrategia(e: typeof pricingStrategies.$inferSelect) {
-  return { id: e.id, nome: e.name, margem: e.margem, cor: e.cor, posicao: e.position };
+  return { id: e.id, nome: e.name, margem: e.margem, piso: e.piso, cor: e.cor, posicao: e.position };
 }
 
 /**
@@ -648,7 +650,7 @@ async function estrategiasDoUsuario(userId: string) {
 
   try {
     await db.insert(pricingStrategies).values(
-      ESTRATEGIAS_PADRAO.map((e, i) => ({ userId, name: e.name, margem: e.margem, cor: e.cor, position: i }))
+      ESTRATEGIAS_PADRAO.map((e, i) => ({ userId, name: e.name, margem: e.margem, piso: e.piso, cor: e.cor, position: i }))
     );
   } catch {
     // Outra requisição semeou primeiro; a releitura abaixo resolve.
@@ -673,6 +675,19 @@ function margemValida(valor: unknown): number | null {
   return n;
 }
 
+/**
+ * Piso aceito: de 0 até a própria margem alvo.
+ *
+ * Piso acima da margem seria uma faixa que nasce violando o próprio limite —
+ * todo produto dela apareceria em alerta desde o primeiro dia.
+ */
+function pisoValido(valor: unknown, margemAlvo: number): number | null {
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (n > margemAlvo) return null;
+  return n;
+}
+
 app.get("/api/pricing-strategies", requireUser, async (req: any, res) => {
   const lista = await estrategiasDoUsuario(req.currentUser.id);
   res.json(lista.map(mapearEstrategia));
@@ -693,10 +708,16 @@ app.post("/api/pricing-strategies", requireUser, async (req: any, res) => {
     return res.status(409).json({ error: `Você já tem uma estratégia chamada "${nome}".` });
   }
 
+  const piso = pisoValido(req.body?.piso ?? 0, margem);
+  if (piso === null) {
+    return res.status(400).json({ error: "O piso precisa ficar entre 0% e a margem alvo da estratégia." });
+  }
+
   const [criada] = await db.insert(pricingStrategies).values({
     userId: req.currentUser.id,
     name: nome,
     margem,
+    piso,
     cor: typeof req.body?.cor === "string" ? req.body.cor : "slate",
     position: existentes.length,
   }).returning();
@@ -717,10 +738,30 @@ app.put("/api/pricing-strategies/:id", requireUser, async (req: any, res) => {
     patch.name = nome;
   }
 
+  // A margem e o piso se validam um contra o outro, então precisamos saber
+  // como a faixa vai ficar DEPOIS deste patch, não como ela está hoje.
+  const atuais = await estrategiasDoUsuario(req.currentUser.id);
+  const atual = atuais.find(e => e.id === req.params.id);
+  if (!atual) return res.status(404).json({ error: "Estratégia não encontrada" });
+
+  let margemFinal = atual.margem;
   if (req.body?.margem !== undefined) {
     const margem = margemValida(req.body.margem);
     if (margem === null) return res.status(400).json({ error: "A margem precisa ficar entre 0% e 99%." });
     patch.margem = margem;
+    margemFinal = margem;
+  }
+
+  if (req.body?.piso !== undefined) {
+    const piso = pisoValido(req.body.piso, margemFinal);
+    if (piso === null) {
+      return res.status(400).json({ error: "O piso precisa ficar entre 0% e a margem alvo da estratégia." });
+    }
+    patch.piso = piso;
+  } else if (patch.margem !== undefined && atual.piso > margemFinal) {
+    // Baixar a margem abaixo do piso existente deixaria a faixa incoerente:
+    // o piso desce junto.
+    patch.piso = margemFinal;
   }
 
   if (typeof req.body?.cor === "string") patch.cor = req.body.cor;

@@ -43,7 +43,7 @@ type SortKey =
   | 'comissao' | 'margem' | 'preco' | 'margemContribuicao' | 'valorMargem' | 'peUnidades'
   | 'classeABC';
 
-type FilterMode = 'todos' | 'sem-rateio' | 'prejuizo' | 'rateio-ocioso' | 'classe-a' | 'classe-b' | 'classe-c';
+type FilterMode = 'todos' | 'sem-rateio' | 'prejuizo' | 'rateio-ocioso' | 'classe-a' | 'classe-b' | 'classe-c' | 'abaixo-piso';
 
 /**
  * Campo aplicável em massa. Os quatro primeiros são fixos; além deles entram as
@@ -332,6 +332,7 @@ export default function MixPrecoLote() {
     if (filterMode === 'classe-a') list = list.filter(p => p.classeABCLetra === 'A');
     if (filterMode === 'classe-b') list = list.filter(p => p.classeABCLetra === 'B');
     if (filterMode === 'classe-c') list = list.filter(p => p.classeABCLetra === 'C');
+    if (filterMode === 'abaixo-piso') list = list.filter(p => p.abaixoDoPiso);
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validProdutos, custosFixos, searchTerm, filterMode, abc]);
@@ -950,6 +951,7 @@ export default function MixPrecoLote() {
                           <div className="flex items-center gap-2">
                             {p.semRateio && <span title="Ainda sem % de rateio atribuído" className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />}
                             {!p.isValidMargem && <span title="Preço resulta em prejuízo" className="w-2 h-2 rounded-full bg-red-500 shrink-0" />}
+                            {p.abaixoDoPiso && <span title={`Abaixo do piso de ${p.pisoPercent}% da faixa ${p.estrategia?.nome ?? ''}`} className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />}
                             <span className="truncate" title={p.nome}>{p.nome}</span>
                           </div>
                           <span className="text-xs text-muted-foreground mt-0.5 ml-4">CMV: {formatCurrency(p.cmv)}</span>
@@ -1157,6 +1159,12 @@ export default function MixPrecoLote() {
                                 <h3 className={`text-3xl font-bold ${p.modoPrecificacao === 'preco' ? 'text-foreground' : ''}`}>{formatCurrency(p.preco)}</h3>
                               </div>
                               <div className="bg-background border border-border p-4 rounded-xl shadow-sm">
+                                {p.precoMinimo !== null && (
+                                  <p className={`text-xs mt-1 font-medium ${p.abaixoDoPiso ? 'text-amber-700' : 'text-muted-foreground'}`}>
+                                    Preço mínimo {formatCurrency(p.precoMinimo)} — piso de {p.pisoPercent}%
+                                    {p.abaixoDoPiso && ' · o preço atual está abaixo dele'}
+                                  </p>
+                                )}
                                 <p className="text-sm font-medium text-muted-foreground mb-1">Margem de Contribuição</p>
                                 <h3 className={`text-2xl font-semibold ${p.margemContribuicao >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(p.margemContribuicao)}</h3>
                               </div>
@@ -1330,6 +1338,30 @@ export default function MixPrecoLote() {
                         className="mt-2 font-semibold underline underline-offset-2 hover:text-red-900"
                       >
                         Ver {mix.produtosComRateioOcioso.length === 1 ? 'o produto' : 'os produtos'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Preço abaixo do piso: não é erro de conta, é decisão de
+                      alguém — um desconto que foi longe demais. Só aparece para
+                      produtos em faixa com piso definido. */}
+                  {mix.produtosAbaixoDoPiso.length > 0 && (
+                    <div className="mb-3 p-2.5 bg-amber-50 border border-amber-300 rounded text-xs text-amber-900">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        {mix.produtosAbaixoDoPiso.length === 1
+                          ? '1 produto abaixo do piso'
+                          : `${mix.produtosAbaixoDoPiso.length} produtos abaixo do piso`}
+                      </p>
+                      <p className="mt-1 leading-relaxed">
+                        O preço aplicado entrega menos margem que o mínimo da faixa deles.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => { setFilterMode('abaixo-piso'); setCurrentPage(1); }}
+                        className="mt-2 font-semibold underline underline-offset-2 hover:text-amber-950"
+                      >
+                        Ver {mix.produtosAbaixoDoPiso.length === 1 ? 'o produto' : 'os produtos'}
                       </button>
                     </div>
                   )}
