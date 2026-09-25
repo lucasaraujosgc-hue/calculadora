@@ -1,107 +1,105 @@
 /**
- * Pricing Engine
- * Fórmulas independentes da interface para cálculos financeiros
+ * Motor de precificação — fonte única da verdade.
+ *
+ * Antes deste módulo, a fórmula da margem de contribuição estava reimplementada
+ * à mão no Dashboard (duas vezes), na Formação de Preço e no Mix de Preços. Foi
+ * assim que o export do Excel passou a divergir da tela: quatro cópias da mesma
+ * conta, e só três foram corrigidas. Agora as telas chamam `calcularProduto` e
+ * `calcularMix`, e ninguém repete a conta.
+ *
+ * Convenção: tudo que termina em `Percent` está em pontos percentuais (15 = 15%).
  */
 
-export interface PricingParams {
-  costPrice: number;
-  salePrice: number;
-  projectedSales?: number;
-  fixedCosts?: number; // Total de custos fixos da empresa
-  unitFixedCost?: number; // Custo fixo unitário (opcional)
-  taxesPercent?: number; // Ex: 0.15 para 15%
-  feesPercent?: number; // Ex: 0.05 para 5%
-  comissionPercent?: number; // Ex: 0.02 para 2%
+/** Percentuais das despesas variáveis que o próprio usuário cadastrou, por id. */
+export type DespesasVariaveisValores = Record<string, number>;
+
+/** Uma despesa variável criada pelo usuário (ex.: "Frete", "Embalagem"). */
+export interface DespesaVariavelDef {
+  id: string;
+  nome: string;
 }
 
 /**
- * Calcula o Markup
- * Markup = (Preço de Venda - Custo) / Custo * 100
+ * Uma faixa de margem nomeada — "Atração", "Padrão", "Margem alta".
+ *
+ * É o que troca a pergunta difícil ("que margem este produto leva?") por uma
+ * fácil ("este produto é de atração ou de margem?"). A política fica em um
+ * lugar só: mudar a margem da faixa muda o preço sugerido de todos os produtos
+ * que a seguem.
  */
-export function calculateMarkup(costPrice: number, salePrice: number): number {
-  if (costPrice <= 0) return 0;
-  return ((salePrice - costPrice) / costPrice) * 100;
+export interface EstrategiaDef {
+  id: string;
+  nome: string;
+  /** Margem líquida alvo, em pontos percentuais. */
+  margem: number;
+  /** Margem mínima aceitável. 0 (ou ausente) significa "sem piso". */
+  piso?: number;
 }
 
 /**
- * Calcula a Margem de Contribuição (Valor Monetário)
- * MC = Preço de Venda - Custo Variável - Impostos Variáveis - Taxas - Comissões
+ * A margem que de fato vale para o produto e de onde ela veio.
+ *
+ * Um produto sem estratégia (ou apontando para uma que foi apagada) cai para a
+ * própria margem — é o modo "Personalizado", e é também o que impede que
+ * apagar uma faixa quebre o preço de quem a seguia.
  */
-export function calculateContributionMargin(params: PricingParams): number {
-  const taxes = params.salePrice * (params.taxesPercent || 0);
-  const fees = params.salePrice * (params.feesPercent || 0);
-  const comission = params.salePrice * (params.comissionPercent || 0);
-  
-  return params.salePrice - params.costPrice - taxes - fees - comission;
+export function resolverMargem(
+  p: Pick<ProdutoCalculo, 'margem' | 'estrategiaId'>,
+  estrategias: EstrategiaDef[] = []
+): { margem: number; estrategia: EstrategiaDef | null } {
+  const estrategia = p.estrategiaId
+    ? estrategias.find(e => e.id === p.estrategiaId) ?? null
+    : null;
+  return {
+    margem: estrategia ? estrategia.margem : (p.margem || 0),
+    estrategia,
+  };
+}
+
+export interface ProdutoCalculo {
+  id: string;
+  nome?: string;
+  cmv: number;
+  vendasProjetadas?: number;
+  /** Fatia do custo fixo da empresa que as vendas deste produto devem cobrir. */
+  percentualRateio?: number;
+  imposto?: number;
+  taxaCartao?: number;
+  /** Comissão de vendedor/representante. */
+  comissao?: number;
+  /** Percentuais das despesas variáveis personalizadas, por id da despesa. */
+  despesasVariaveis?: DespesasVariaveisValores;
+  /** Margem própria do produto. Só vale quando não há estratégia. */
+  margem?: number;
+  /** Faixa de margem que o produto segue; `null`/ausente = Personalizado. */
+  estrategiaId?: string | null;
+  modoPrecificacao?: 'margem' | 'preco';
+  precoFixo?: number;
 }
 
 /**
- * Calcula a Margem de Contribuição (Percentual)
+ * Soma os percentuais das despesas personalizadas de um produto.
+ *
+ * Só conta as despesas que ainda existem na lista do usuário: apagar uma
+ * despesa tem que tirá-la do preço na hora, mesmo que o valor continue gravado
+ * no produto — é o que permite desfazer a exclusão sem perder os percentuais.
  */
-export function calculateContributionMarginPercent(params: PricingParams): number {
-  if (params.salePrice <= 0) return 0;
-  const margin = calculateContributionMargin(params);
-  return (margin / params.salePrice) * 100;
-}
-
-/**
- * Calcula o Ponto de Equilíbrio de um único produto (em unidades)
- * PE = Custos Fixos / Margem de Contribuição Unitária
- */
-export function calculateBreakEven(params: PricingParams): number {
-  const margin = calculateContributionMargin(params);
-  if (margin <= 0) return Infinity; // Se a margem for zero ou negativa, nunca alcança o ponto de equilíbrio
-  const fixed = params.fixedCosts || 0;
-  return fixed / margin;
-}
-
-/**
- * Calcula o Ponto de Equilíbrio da Empresa (em faturamento) baseado no Mix
- * Recebe a lista de produtos, seus volumes e os custos fixos totais.
- */
-export function calculateMixBreakEven(
-  products: (PricingParams & { projectedSales: number })[],
-  totalFixedCosts: number
+export function somarDespesasPersonalizadas(
+  valores: DespesasVariaveisValores | undefined,
+  definicoes: DespesaVariavelDef[]
 ): number {
-  let totalRevenue = 0;
-  let totalContributionMargin = 0;
-
-  for (const p of products) {
-    const revenue = p.salePrice * p.projectedSales;
-    const margin = calculateContributionMargin(p) * p.projectedSales;
-    totalRevenue += revenue;
-    totalContributionMargin += margin;
-  }
-
-  if (totalRevenue === 0) return 0;
-  
-  const weightedMarginPercent = totalContributionMargin / totalRevenue;
-  
-  if (weightedMarginPercent <= 0) return Infinity;
-
-  return totalFixedCosts / weightedMarginPercent;
+  if (!valores) return 0;
+  return definicoes.reduce((total, def) => total + (Number(valores[def.id]) || 0), 0);
 }
 
 /**
- * Calcula o Resultado Operacional (Lucro/Prejuízo)
- */
-export function calculateOperatingResult(
-  products: (PricingParams & { projectedSales: number })[],
-  totalFixedCosts: number
-): number {
-  let totalContributionMargin = 0;
-
-  for (const p of products) {
-    const margin = calculateContributionMargin(p) * p.projectedSales;
-    totalContributionMargin += margin;
-  }
-
-  return totalContributionMargin - totalFixedCosts;
-}
-
-/**
- * Calcula o Preço de Venda ideal baseado em uma margem desejada
- * Preço = Custo / (1 - (Impostos + Taxas + Comissões + Margem Desejada))
+ * Preço de venda que entrega a margem desejada.
+ *
+ * Preço = (CMV + custo fixo unitário) / (1 - deduções), com todas as deduções
+ * expressas como fração do PREÇO — que é o que as torna somáveis entre si.
+ * Por isso a margem aqui é margem sobre o preço, não markup sobre o custo.
+ *
+ * Todos os parâmetros são frações (0,15 = 15%), não pontos percentuais.
  */
 export function calculateSellingPrice(
   costPrice: number,
@@ -112,7 +110,250 @@ export function calculateSellingPrice(
   desiredMarginPercent: number
 ): number {
   const totalDeductions = taxesPercent + feesPercent + comissionPercent + desiredMarginPercent;
-  if (totalDeductions >= 1) return 0; // Inválido, as deduções consomem 100% ou mais do preço
-  
+  // As deduções consomem o preço inteiro: não existe preço finito que feche a conta.
+  if (totalDeductions >= 1) return 0;
+
   return (costPrice + unitFixedCost) / (1 - totalDeductions);
+}
+
+export interface ResultadoProduto {
+  /** Rateio em reais que este produto recebeu do custo fixo da empresa. */
+  valorRateadoCF: number;
+  /**
+   * Custo fixo embutido em cada unidade. Vale 0 quando não há vendas
+   * projetadas — e é aí que mora o vazamento que `calcularMix` denuncia.
+   */
+  custoFixoUnitario: number;
+  /** Imposto, em pontos percentuais. Fatia "Impostos" da composição do preço. */
+  impostoPercent: number;
+  /** Taxa de cartão + comissão + personalizadas. Fatia "Taxas & Despesas". */
+  despesasPercent: number;
+  /** Tudo que é descontado do preço, sem a margem. */
+  deducoesPercent: number;
+  /** Preço que entregaria a margem desejada, sempre calculado. */
+  precoSugerido: number;
+  /** Lucro por unidade no preço sugerido. */
+  valorMargemSugerido: number;
+  /** Preço em vigor: o sugerido, ou o fixado à mão no modo 'preco'. */
+  preco: number;
+  /** Margem que o preço em vigor realmente entrega. */
+  margemReal: number;
+  valorImposto: number;
+  valorDespesas: number;
+  valorMargem: number;
+  margemContribuicao: number;
+  /** Unidades necessárias para pagar a cota de custo fixo deste produto. */
+  peUnidades: number;
+  /** Margem alvo em vigor, venha da estratégia ou do próprio produto. */
+  margemAlvo: number;
+  /** Piso de margem da faixa; 0 quando não há faixa ou a faixa não define piso. */
+  pisoPercent: number;
+  /**
+   * Menor preço que ainda respeita o piso. `null` quando não há piso.
+   * É o número que falta na hora de negociar um desconto.
+   */
+  precoMinimo: number | null;
+  /** O preço em vigor entrega menos que o piso da faixa. */
+  abaixoDoPiso: boolean;
+  /** A faixa que o produto segue, ou null quando é Personalizado. */
+  estrategia: EstrategiaDef | null;
+  /** A margem de contribuição é positiva — o produto ajuda a pagar as contas. */
+  isValidMargem: boolean;
+  /** Tem rateio, mas nenhuma venda projetada: a cota dele some do preço. */
+  rateioOcioso: boolean;
+}
+
+/**
+ * Calcula um produto isolado dentro do contexto de custo fixo da empresa.
+ *
+ * `definicoes` é a lista de despesas variáveis do usuário; sem ela, as despesas
+ * personalizadas não entram na conta.
+ */
+export function calcularProduto(
+  p: ProdutoCalculo,
+  custoFixoTotal: number,
+  definicoes: DespesaVariavelDef[] = [],
+  estrategias: EstrategiaDef[] = []
+): ResultadoProduto {
+  const imposto = p.imposto || 0;
+  const taxaCartao = p.taxaCartao || 0;
+  const comissao = p.comissao || 0;
+  const personalizadas = somarDespesasPersonalizadas(p.despesasVariaveis, definicoes);
+  const { margem, estrategia } = resolverMargem(p, estrategias);
+  const vendas = p.vendasProjetadas || 0;
+  const rateio = p.percentualRateio || 0;
+
+  const valorRateadoCF = (rateio / 100) * custoFixoTotal;
+  const custoFixoUnitario = vendas > 0 ? valorRateadoCF / vendas : 0;
+
+  const impostoPercent = imposto;
+  const despesasPercent = taxaCartao + comissao + personalizadas;
+  const deducoesPercent = impostoPercent + despesasPercent;
+
+  const precoSugerido = calculateSellingPrice(
+    p.cmv,
+    custoFixoUnitario,
+    impostoPercent / 100,
+    despesasPercent / 100,
+    0,
+    margem / 100
+  );
+  const valorMargemSugerido = precoSugerido * (margem / 100);
+
+  let preco = precoSugerido;
+  let margemReal = margem;
+
+  if (p.modoPrecificacao === 'preco') {
+    preco = p.precoFixo || 0;
+    const custoTotal = p.cmv + custoFixoUnitario;
+    const lucroReais = preco - custoTotal - preco * (deducoesPercent / 100);
+    margemReal = preco > 0 ? (lucroReais / preco) * 100 : 0;
+  }
+
+  // O piso só morde quando alguém foge do preço calculado: o preço sugerido já
+  // entrega a margem alvo, que nunca é menor que o piso (o cadastro valida).
+  const pisoPercent = estrategia?.piso && estrategia.piso > 0 ? estrategia.piso : 0;
+  const precoMinimo = pisoPercent > 0
+    ? calculateSellingPrice(p.cmv, custoFixoUnitario, impostoPercent / 100, despesasPercent / 100, 0, pisoPercent / 100)
+    : null;
+
+  const valorImposto = preco * (impostoPercent / 100);
+  const valorDespesas = preco * (despesasPercent / 100);
+  const valorMargem = preco * (margemReal / 100);
+  const margemContribuicao = preco - p.cmv - valorImposto - valorDespesas;
+
+  const isValidMargem = margemContribuicao > 0;
+
+  return {
+    valorRateadoCF,
+    custoFixoUnitario,
+    impostoPercent,
+    despesasPercent,
+    deducoesPercent,
+    precoSugerido,
+    valorMargemSugerido,
+    preco,
+    margemReal,
+    valorImposto,
+    valorDespesas,
+    valorMargem,
+    margemContribuicao,
+    peUnidades: isValidMargem ? valorRateadoCF / margemContribuicao : Infinity,
+    margemAlvo: margem,
+    pisoPercent,
+    precoMinimo,
+    // Uma diferença de centésimo de ponto é arredondamento, não violação.
+    abaixoDoPiso: pisoPercent > 0 && preco > 0 && margemReal < pisoPercent - 0.005,
+    estrategia,
+    isValidMargem,
+    rateioOcioso: rateio > 0 && vendas <= 0,
+  };
+}
+
+export interface ResultadoMix<T extends ProdutoCalculo = ProdutoCalculo> {
+  produtos: (T & ResultadoProduto)[];
+  receitaTotal: number;
+  vendasTotais: number;
+  margemContribuicaoTotal: number;
+  custosVariaveisTotais: number;
+  impostoValorTotal: number;
+  despesasValorTotal: number;
+  /** Margem de contribuição total menos o custo fixo INTEIRO da empresa. */
+  lucroLiquidoTotal: number;
+  percMargemContribuicao: number;
+  percLucroLiquido: number;
+  pontoEquilibrioFaturamento: number;
+  /** Soma dos percentuais de rateio. Deveria fechar em 100. */
+  totalRateio: number;
+  /**
+   * Custo fixo que nenhum preço cobre, porque ninguém o rateou (rateio < 100%).
+   */
+  custoFixoNaoRateado: number;
+  /**
+   * Custo fixo rateado para produtos SEM vendas projetadas.
+   *
+   * O custo fixo unitário é a cota dividida pelas vendas; sem vendas, a divisão
+   * não acontece e a cota simplesmente não entra em preço nenhum. O rateio fecha
+   * 100%, a tela fica verde, todo produto aparece "no alvo" — e o dinheiro
+   * sumiu. É o motivo de o Mix e o Dashboard poderem discordar.
+   */
+  custoFixoNaoAbsorvido: number;
+  /** Produtos que seguram esse rateio ocioso. */
+  produtosComRateioOcioso: (T & ResultadoProduto)[];
+  /** Produtos cujo preço aplicado entrega menos que o piso da faixa deles. */
+  produtosAbaixoDoPiso: (T & ResultadoProduto)[];
+  /** O custo fixo que os preços de fato embutem. */
+  custoFixoAbsorvido: number;
+  /** Custo fixo que nenhum preço cobre, pelos dois motivos somados. */
+  custoFixoDescoberto: number;
+}
+
+/**
+ * Calcula o mix inteiro: cada produto e os totais da empresa.
+ *
+ * O lucro do mix usa o custo fixo TOTAL, não o rateado — é o resultado de
+ * verdade. A diferença entre ele e a soma das margens "no alvo" de cada produto
+ * é exatamente `custoFixoDescoberto`, e é isso que as telas precisam mostrar em
+ * vez de deixar o usuário descobrir no extrato bancário.
+ */
+export function calcularMix<T extends ProdutoCalculo>(
+  produtos: T[],
+  custoFixoTotal: number,
+  definicoes: DespesaVariavelDef[] = [],
+  estrategias: EstrategiaDef[] = []
+): ResultadoMix<T> {
+  const calculados = produtos.map(p => ({
+    ...p,
+    ...calcularProduto(p, custoFixoTotal, definicoes, estrategias),
+  }));
+
+  let receitaTotal = 0;
+  let vendasTotais = 0;
+  let margemContribuicaoTotal = 0;
+  let custosVariaveisTotais = 0;
+  let impostoValorTotal = 0;
+  let despesasValorTotal = 0;
+  let custoFixoAbsorvido = 0;
+  let totalRateio = 0;
+
+  for (const p of calculados) {
+    const vendas = p.vendasProjetadas || 0;
+    receitaTotal += p.preco * vendas;
+    vendasTotais += vendas;
+    margemContribuicaoTotal += p.margemContribuicao * vendas;
+    custosVariaveisTotais += p.cmv * vendas;
+    impostoValorTotal += p.valorImposto * vendas;
+    despesasValorTotal += p.valorDespesas * vendas;
+    custoFixoAbsorvido += p.custoFixoUnitario * vendas;
+    totalRateio += p.percentualRateio || 0;
+  }
+
+  const lucroLiquidoTotal = margemContribuicaoTotal - custoFixoTotal;
+  const percMargemContribuicao = receitaTotal > 0 ? (margemContribuicaoTotal / receitaTotal) * 100 : 0;
+
+  const custoFixoRateado = (totalRateio / 100) * custoFixoTotal;
+  // Diferenças de centavo no rateio não são vazamento — só ruído de arredondamento.
+  const arredondar = (v: number) => (Math.abs(v) < 0.005 ? 0 : v);
+
+  return {
+    produtos: calculados,
+    receitaTotal,
+    vendasTotais,
+    margemContribuicaoTotal,
+    custosVariaveisTotais,
+    impostoValorTotal,
+    despesasValorTotal,
+    lucroLiquidoTotal,
+    percMargemContribuicao,
+    percLucroLiquido: receitaTotal > 0 ? (lucroLiquidoTotal / receitaTotal) * 100 : 0,
+    pontoEquilibrioFaturamento:
+      percMargemContribuicao > 0 ? custoFixoTotal / (percMargemContribuicao / 100) : 0,
+    totalRateio,
+    custoFixoNaoRateado: arredondar(custoFixoTotal - custoFixoRateado),
+    custoFixoNaoAbsorvido: arredondar(custoFixoRateado - custoFixoAbsorvido),
+    produtosComRateioOcioso: calculados.filter(p => p.rateioOcioso),
+    produtosAbaixoDoPiso: calculados.filter(p => p.abaixoDoPiso),
+    custoFixoAbsorvido,
+    custoFixoDescoberto: arredondar(custoFixoTotal - custoFixoAbsorvido),
+  };
 }

@@ -14,6 +14,8 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import PainelElasticidade from './PainelElasticidade';
+import ConciliacaoProdutos from './ConciliacaoProdutos';
 import { formatCurrency } from '../utils/format';
 import { sugerirCadastro } from '../domain/fiscal/agregacao';
 import type { ResumoProduto } from '../domain/fiscal/tipos';
@@ -287,6 +289,10 @@ export default function ImportadorXmlNfe() {
         const s = sugestoes.get(p.chaveProduto)!;
         return {
           nome: p.descricao,
+          // A chave amarra este produto do cadastro ao das notas. Daqui em
+          // diante o reconhecimento é por ela, não pelo nome — que o usuário
+          // pode trocar quando quiser.
+          chaveProduto: p.chaveProduto,
           cmv: s.cmv,
           precoVenda: s.precoVenda,
           vendasProjetadas: s.vendasProjetadas,
@@ -771,6 +777,23 @@ export default function ImportadorXmlNfe() {
                 </div>
               </div>
 
+              {/* O custo vem da nota como ela foi emitida: valor do produto mais
+                  frete, seguro, IPI e ST, menos desconto. Nenhum imposto é
+                  abatido, porque saber se a empresa aproveita crédito depende do
+                  regime dela e do CST de cada item — coisa do contador, não
+                  desta tela. Para quem está no Simples isso já é o custo certo;
+                  para quem credita, o custo real é menor, e é melhor o usuário
+                  saber disso aqui do que descobrir com o preço na rua. */}
+              <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md p-3 flex items-start gap-2">
+                <Info className="w-4 h-4 shrink-0 mt-px" />
+                <span>
+                  <strong>Custo com impostos inclusos.</strong> É o valor que a nota cobrou de você, com
+                  frete, IPI e ST somados. Se sua empresa é do Simples Nacional, é esse mesmo o custo.
+                  Se ela aproveita crédito de ICMS ou PIS/COFINS (Lucro Real ou Presumido), o custo real
+                  é menor — confirme com seu contador antes de fechar o preço.
+                </span>
+              </p>
+
               {avisoAplicacao && (
                 <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md p-3">{avisoAplicacao}</p>
               )}
@@ -928,6 +951,8 @@ export default function ImportadorXmlNfe() {
                                       <span className="font-normal text-muted-foreground"> · códigos nas notas: {p.codigos.join(', ')}</span>
                                     )}
                                   </p>
+                                  <PainelElasticidade elasticidade={(p as any).elasticidade} />
+
                                   <table className="w-full text-xs">
                                     <thead className="text-muted-foreground">
                                       <tr className="border-b border-border">
@@ -975,6 +1000,10 @@ export default function ImportadorXmlNfe() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              <div className="border border-border rounded-lg p-3">
+                <ConciliacaoProdutos />
               </div>
 
               {vinculos.some(v => v.status === 'confirmado') && (
@@ -1044,7 +1073,7 @@ export default function ImportadorXmlNfe() {
                   Nos dois casos a conversão só vale depois que você confirmar. Você também pode vincular na mão, pelo botão
                   ao lado do produto.
                   O custo médio já inclui frete, seguro, outras despesas, IPI e ICMS-ST da nota, descontado o desconto —
-                  é o custo de aquisição de verdade. Devoluções, transferências e remessas ficam fora das médias para não
+                  é o que a compra custou no caixa. Devoluções, transferências e remessas ficam fora das médias para não
                   distorcer o preço. As médias são ponderadas pela quantidade.
                 </span>
               </div>

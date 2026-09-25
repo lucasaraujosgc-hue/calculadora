@@ -3,7 +3,7 @@ import { Shield, Trash2, CheckCircle2, XCircle, UserCog, Settings, Plus, X, Uplo
 import { useAppContext } from '../context/AppContext';
 
 export default function AdminPanel() {
-  const { user } = useAppContext();
+  const { user, planosAtivos } = useAppContext();
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [freeModeEnabled, setFreeModeEnabled] = useState(false);
@@ -247,6 +247,10 @@ export default function AdminPanel() {
         <p className="text-muted-foreground mt-1 text-sm">Gerencie os usuários cadastrados na plataforma.</p>
       </div>
 
+      {/* O modo gratuito existe para tirar os planos pagos do ar temporariamente.
+          Com os planos desligados no código (PLANOS_ATIVOS), este botão não muda
+          nada — e um botão que não faz nada é pior que botão nenhum. */}
+      {planosAtivos && (
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -272,6 +276,7 @@ export default function AdminPanel() {
           </button>
         </div>
       </div>
+      )}
 
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 sm:p-6 border-b border-border bg-muted/30 flex justify-between items-center">
@@ -290,7 +295,7 @@ export default function AdminPanel() {
                   <th className="px-4 py-3">E-mail</th>
                   <th className="px-4 py-3">Telefone</th>
                   <th className="px-4 py-3">Cargo</th>
-                  <th className="px-4 py-3">Plano</th>
+                  {planosAtivos && <th className="px-4 py-3">Plano</th>}
                   <th className="px-4 py-3">Data de Cadastro</th>
                   <th className="px-4 py-3 text-right">Ações</th>
                 </tr>
@@ -312,6 +317,7 @@ export default function AdminPanel() {
                         </span>
                       )}
                     </td>
+                    {planosAtivos && (
                     <td className="px-4 py-3">
                       {u.role !== 'admin' ? (
                         <select 
@@ -345,6 +351,7 @@ export default function AdminPanel() {
                         <span className="text-xs text-muted-foreground uppercase font-bold">Admin</span>
                       )}
                     </td>
+                    )}
                     <td className="px-4 py-3 text-muted-foreground">
                       {new Date(u.createdAt).toLocaleDateString('pt-BR')}
                     </td>

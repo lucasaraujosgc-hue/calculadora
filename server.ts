@@ -12,16 +12,18 @@ import crypto from "crypto";
 import { db } from "./src/db/index.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { users, products, fixedCosts, payments, courses, leads, webhookEvents, snapshots, store,
-  fiscalDocuments, fiscalItems, fiscalProductLinks } from "./src/db/schema.js";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+  fiscalDocuments, fiscalItems, fiscalProductLinks, variableExpenses, pricingStrategies } from "./src/db/schema.js";
+import { eq, and, gte, lte, desc, asc, inArray } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { ErroNotaFiscal, direcaoDaNota, lerNotaFiscal, normalizarDescricao, somenteDigitos } from "./src/domain/fiscal/nfe.js";
 import { sugerirVinculos } from "./src/domain/fiscal/sugestoes.js";
+import { sugerirConciliacao } from "./src/domain/fiscal/conciliacao.js";
 import AdmZip from "adm-zip";
 import { aplicarVinculos, resumirPorProdutoPeriodo, type ItemComContexto } from "./src/domain/fiscal/agregacao.js";
+import { estimarElasticidade } from "./src/domain/elasticidade/index.js";
 
 dotenv.config();
 
@@ -65,6 +67,35 @@ export const PLANS = {
 } as const;
 export type PlanId = keyof typeof PLANS;
 
+/**
+ * Planos pagos desligados.
+ *
+ * Com `false`, a aba /planos some do menu, a rota deixa de existir, o checkout
+ * e a listagem de planos respondem 404, e nenhum limite de plano é aplicado.
+ * Esta última parte não é opcional: sem ela o usuário bate em "Limite do plano
+ * atingido (20 produtos). Faça o upgrade" e o upgrade não existe mais — um beco
+ * sem saída.
+ *
+ * Nada de pagamento foi apagado. PLANS, a tabela `payments`, o checkout e o
+ * webhook continuam no código, só inalcançáveis. Trocar para `true` traz tudo
+ * de volta como estava.
+ *
+ * O webhook do Pagar.me é a única exceção e continua aberto de propósito: um
+ * pagamento que já estava em curso quando os planos saíram do ar ainda precisa
+ * ser processado, senão fica dinheiro preso sem baixa.
+ */
+export const PLANOS_ATIVOS = false;
+
+/**
+ * Se os limites de plano valem para esta requisição.
+ *
+ * Com os planos desligados, ninguém é limitado. Com eles ligados, vale o modo
+ * gratuito que o admin controla.
+ */
+async function semLimiteDePlano(): Promise<boolean> {
+  return !PLANOS_ATIVOS || (await isFreeModeEnabled());
+}
+
 // --- Free mode toggle ---
 // Lets us take the paid option off the table temporarily (everyone gets
 // unlimited access) without deleting any of the payment code, so it can be
@@ -81,13 +112,19 @@ async function isFreeModeEnabled(): Promise<boolean> {
 // Público: lets the frontend know whether paid plans are currently active,
 // so it can hide pricing/checkout/limit nags during a free period.
 app.get("/api/settings", async (req, res) => {
-  res.json({ freeModeEnabled: await isFreeModeEnabled() });
+  // `freeModeEnabled` já é o sinal que o menu usa para esconder a aba de planos,
+  // então desligar os planos reaproveita esse caminho sem tocar no Layout.
+  res.json({
+    freeModeEnabled: await semLimiteDePlano(),
+    planosAtivos: PLANOS_ATIVOS,
+  });
 });
 
 // Público: única fonte de verdade sobre preços/limites dos planos, consumida
 // pela tela de preços no frontend para evitar duplicar (e desalinhar) esses
 // valores em dois lugares.
 app.get("/api/plans", (req, res) => {
+  if (!PLANOS_ATIVOS) return res.status(404).json({ error: "Planos não estão disponíveis." });
   res.json(Object.values(PLANS).map(p => ({
     id: p.id,
     name: p.name,
@@ -320,7 +357,7 @@ app.post("/api/register", authLimiter, async (req, res) => {
     if (existing.length > 0) return res.status(400).json({ error: "E-mail já cadastrado" });
     const passwordHash = await bcrypt.hash(parsed.password, 10);
     const isBootstrapAdmin = !!process.env.ADMIN_EMAIL && parsed.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase();
-    const freeMode = await isFreeModeEnabled();
+    const freeMode = await semLimiteDePlano();
 
     const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
     const newUser = await db.insert(users).values({
@@ -589,6 +626,304 @@ app.put("/api/me", requireUser, async (req: any, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Despesas variáveis personalizadas
+// ---------------------------------------------------------------------------
+//
+// Cada empresa tem as suas: uma paga frete, outra paga taxa de marketplace,
+// outra embala presente. Antes tudo isso ia para o campo único "Outros", que
+// somava no preço sem dizer de onde vinha.
+//
+// Toda rota aqui filtra por `userId` na consulta E na cláusula de escrita, então
+// a lista de um usuário é invisível — e inalterável — para qualquer outro. Um
+// id de despesa de outra conta simplesmente não encontra linha para atualizar.
+
+// ---------------------------------------------------------------------------
+// Estratégias de margem
+// ---------------------------------------------------------------------------
+//
+// Poucas faixas nomeadas no lugar de uma margem solta por produto. O lojista
+// não precisa decidir "que margem leva o parafuso" trezentas vezes; decide uma
+// vez o que é produto de atração e o que é produto de margem, e ajusta a
+// política mexendo na faixa.
+//
+// Como as despesas variáveis, tudo aqui é filtrado por `userId`.
+
+const NOME_ESTRATEGIA_MAX = 30;
+const MAX_ESTRATEGIAS = 8;
+
+/**
+ * As faixas com que toda conta começa. São um ponto de partida editável, não
+ * uma regra: o usuário renomeia, muda os percentuais, cria e apaga.
+ */
+const ESTRATEGIAS_PADRAO = [
+  // 0% existe para o caso de venda a preço de custo (brinde, item de combo,
+  // queima de estoque) sem obrigar o usuário a cair em "Personalizado".
+  { name: "Sem margem", margem: 0, piso: 0, cor: "rose" },
+  // O piso só vem preenchido na faixa de atração: é lá que o desconto costuma
+  // ir longe demais. Nas outras nasce zerado, para o usuário decidir.
+  { name: "Atração", margem: 10, piso: 5, cor: "sky" },
+  { name: "Padrão", margem: 20, piso: 0, cor: "slate" },
+  { name: "Margem alta", margem: 30, piso: 0, cor: "emerald" },
+];
+
+function mapearEstrategia(e: typeof pricingStrategies.$inferSelect) {
+  return { id: e.id, nome: e.name, margem: e.margem, piso: e.piso, cor: e.cor, posicao: e.position };
+}
+
+/**
+ * Lê as faixas do usuário, criando as três padrão na primeira vez.
+ *
+ * Semear na leitura (e não no cadastro) faz as contas que já existiam antes
+ * desta funcionalidade ganharem as faixas sem precisar de migração de dados.
+ * Uma corrida entre duas abas cai no índice único (userId, name) — daí o
+ * catch, que simplesmente relê o que a outra aba criou.
+ */
+async function estrategiasDoUsuario(userId: string) {
+  const existentes = await db.select().from(pricingStrategies)
+    .where(eq(pricingStrategies.userId, userId))
+    .orderBy(asc(pricingStrategies.position), asc(pricingStrategies.createdAt));
+  if (existentes.length > 0) return existentes;
+
+  try {
+    await db.insert(pricingStrategies).values(
+      ESTRATEGIAS_PADRAO.map((e, i) => ({ userId, name: e.name, margem: e.margem, piso: e.piso, cor: e.cor, position: i }))
+    );
+  } catch {
+    // Outra requisição semeou primeiro; a releitura abaixo resolve.
+  }
+
+  return db.select().from(pricingStrategies)
+    .where(eq(pricingStrategies.userId, userId))
+    .orderBy(asc(pricingStrategies.position), asc(pricingStrategies.createdAt));
+}
+
+function nomeEstrategiaValido(valor: unknown): string | null {
+  if (typeof valor !== "string") return null;
+  const nome = valor.trim().replace(/\s+/g, " ");
+  if (!nome || nome.length > NOME_ESTRATEGIA_MAX) return null;
+  return nome;
+}
+
+/** Margem alvo aceita: de 0 a 99%. Em 100% o preço não fecha (divisão por zero). */
+function margemValida(valor: unknown): number | null {
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n < 0 || n >= 100) return null;
+  return n;
+}
+
+/**
+ * Piso aceito: de 0 até a própria margem alvo.
+ *
+ * Piso acima da margem seria uma faixa que nasce violando o próprio limite —
+ * todo produto dela apareceria em alerta desde o primeiro dia.
+ */
+function pisoValido(valor: unknown, margemAlvo: number): number | null {
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (n > margemAlvo) return null;
+  return n;
+}
+
+app.get("/api/pricing-strategies", requireUser, async (req: any, res) => {
+  const lista = await estrategiasDoUsuario(req.currentUser.id);
+  res.json(lista.map(mapearEstrategia));
+});
+
+app.post("/api/pricing-strategies", requireUser, async (req: any, res) => {
+  const nome = nomeEstrategiaValido(req.body?.nome ?? req.body?.name);
+  if (!nome) return res.status(400).json({ error: `Informe um nome de até ${NOME_ESTRATEGIA_MAX} caracteres.` });
+
+  const margem = margemValida(req.body?.margem);
+  if (margem === null) return res.status(400).json({ error: "A margem precisa ficar entre 0% e 99%." });
+
+  const existentes = await estrategiasDoUsuario(req.currentUser.id);
+  if (existentes.length >= MAX_ESTRATEGIAS) {
+    return res.status(400).json({ error: `Você já tem ${MAX_ESTRATEGIAS} estratégias. Remova alguma para criar outra.` });
+  }
+  if (existentes.some(e => e.name.toLowerCase() === nome.toLowerCase())) {
+    return res.status(409).json({ error: `Você já tem uma estratégia chamada "${nome}".` });
+  }
+
+  const piso = pisoValido(req.body?.piso ?? 0, margem);
+  if (piso === null) {
+    return res.status(400).json({ error: "O piso precisa ficar entre 0% e a margem alvo da estratégia." });
+  }
+
+  const [criada] = await db.insert(pricingStrategies).values({
+    userId: req.currentUser.id,
+    name: nome,
+    margem,
+    piso,
+    cor: typeof req.body?.cor === "string" ? req.body.cor : "slate",
+    position: existentes.length,
+  }).returning();
+
+  res.json({ success: true, estrategia: mapearEstrategia(criada) });
+});
+
+app.put("/api/pricing-strategies/:id", requireUser, async (req: any, res) => {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+
+  if (req.body?.nome !== undefined || req.body?.name !== undefined) {
+    const nome = nomeEstrategiaValido(req.body?.nome ?? req.body?.name);
+    if (!nome) return res.status(400).json({ error: `Informe um nome de até ${NOME_ESTRATEGIA_MAX} caracteres.` });
+    const outras = await estrategiasDoUsuario(req.currentUser.id);
+    if (outras.some(e => e.id !== req.params.id && e.name.toLowerCase() === nome.toLowerCase())) {
+      return res.status(409).json({ error: `Você já tem uma estratégia chamada "${nome}".` });
+    }
+    patch.name = nome;
+  }
+
+  // A margem e o piso se validam um contra o outro, então precisamos saber
+  // como a faixa vai ficar DEPOIS deste patch, não como ela está hoje.
+  const atuais = await estrategiasDoUsuario(req.currentUser.id);
+  const atual = atuais.find(e => e.id === req.params.id);
+  if (!atual) return res.status(404).json({ error: "Estratégia não encontrada" });
+
+  let margemFinal = atual.margem;
+  if (req.body?.margem !== undefined) {
+    const margem = margemValida(req.body.margem);
+    if (margem === null) return res.status(400).json({ error: "A margem precisa ficar entre 0% e 99%." });
+    patch.margem = margem;
+    margemFinal = margem;
+  }
+
+  if (req.body?.piso !== undefined) {
+    const piso = pisoValido(req.body.piso, margemFinal);
+    if (piso === null) {
+      return res.status(400).json({ error: "O piso precisa ficar entre 0% e a margem alvo da estratégia." });
+    }
+    patch.piso = piso;
+  } else if (patch.margem !== undefined && atual.piso > margemFinal) {
+    // Baixar a margem abaixo do piso existente deixaria a faixa incoerente:
+    // o piso desce junto.
+    patch.piso = margemFinal;
+  }
+
+  if (typeof req.body?.cor === "string") patch.cor = req.body.cor;
+
+  const atualizada = await db.update(pricingStrategies).set(patch)
+    .where(and(
+      eq(pricingStrategies.id, req.params.id as any),
+      eq(pricingStrategies.userId, req.currentUser.id),
+    )).returning();
+
+  if (atualizada.length === 0) return res.status(404).json({ error: "Estratégia não encontrada" });
+  res.json({ success: true, estrategia: mapearEstrategia(atualizada[0]) });
+});
+
+app.delete("/api/pricing-strategies/:id", requireUser, async (req: any, res) => {
+  const userId = req.currentUser.id;
+
+  const removida = await db.transaction(async (tx: any) => {
+    const alvo = await tx.select().from(pricingStrategies)
+      .where(and(eq(pricingStrategies.id, req.params.id as any), eq(pricingStrategies.userId, userId)));
+    if (alvo.length === 0) return null;
+
+    // Os produtos que seguiam esta faixa viram "Personalizado" com a margem que
+    // a faixa tinha — o preço deles não muda no momento da exclusão, que é o
+    // que evita um susto de reprecificação em massa por um clique.
+    await tx.update(products)
+      .set({ estrategiaId: null, margem: alvo[0].margem, updatedAt: new Date() })
+      .where(and(eq(products.userId, userId), eq(products.estrategiaId, req.params.id as any)));
+
+    await tx.delete(pricingStrategies)
+      .where(and(eq(pricingStrategies.id, req.params.id as any), eq(pricingStrategies.userId, userId)));
+    return alvo[0];
+  });
+
+  if (!removida) return res.status(404).json({ error: "Estratégia não encontrada" });
+  res.json({ success: true });
+});
+
+const NOME_DESPESA_MAX = 40;
+
+function nomeDespesaValido(valor: unknown): string | null {
+  if (typeof valor !== "string") return null;
+  const nome = valor.trim().replace(/\s+/g, " ");
+  if (!nome || nome.length > NOME_DESPESA_MAX) return null;
+  return nome;
+}
+
+function mapearDespesa(d: typeof variableExpenses.$inferSelect) {
+  return { id: d.id, nome: d.name, posicao: d.position };
+}
+
+app.get("/api/variable-expenses", requireUser, async (req: any, res) => {
+  const lista = await db.select().from(variableExpenses)
+    .where(eq(variableExpenses.userId, req.currentUser.id))
+    .orderBy(asc(variableExpenses.position), asc(variableExpenses.createdAt));
+  res.json(lista.map(mapearDespesa));
+});
+
+app.post("/api/variable-expenses", requireUser, async (req: any, res) => {
+  const nome = nomeDespesaValido(req.body?.nome ?? req.body?.name);
+  if (!nome) {
+    return res.status(400).json({ error: `Informe um nome de até ${NOME_DESPESA_MAX} caracteres.` });
+  }
+
+  const existentes = await db.select().from(variableExpenses)
+    .where(eq(variableExpenses.userId, req.currentUser.id));
+
+  // Um teto por usuário: cada despesa vira uma coluna no Mix, e além disso a
+  // tabela deixa de caber na tela.
+  if (existentes.length >= 12) {
+    return res.status(400).json({ error: "Você já tem 12 despesas variáveis. Remova alguma para criar outra." });
+  }
+  if (existentes.some(d => d.name.toLowerCase() === nome.toLowerCase())) {
+    return res.status(409).json({ error: `Você já tem uma despesa chamada "${nome}".` });
+  }
+
+  const [criada] = await db.insert(variableExpenses).values({
+    userId: req.currentUser.id,
+    name: nome,
+    position: existentes.length,
+  }).returning();
+
+  res.json({ success: true, despesa: mapearDespesa(criada) });
+});
+
+app.put("/api/variable-expenses/:id", requireUser, async (req: any, res) => {
+  const nome = nomeDespesaValido(req.body?.nome ?? req.body?.name);
+  if (!nome) {
+    return res.status(400).json({ error: `Informe um nome de até ${NOME_DESPESA_MAX} caracteres.` });
+  }
+
+  const conflito = await db.select().from(variableExpenses)
+    .where(eq(variableExpenses.userId, req.currentUser.id));
+  if (conflito.some(d => d.id !== req.params.id && d.name.toLowerCase() === nome.toLowerCase())) {
+    return res.status(409).json({ error: `Você já tem uma despesa chamada "${nome}".` });
+  }
+
+  const atualizada = await db.update(variableExpenses)
+    .set({ name: nome, updatedAt: new Date() })
+    .where(and(
+      eq(variableExpenses.id, req.params.id as any),
+      eq(variableExpenses.userId, req.currentUser.id),
+    )).returning();
+
+  if (atualizada.length === 0) return res.status(404).json({ error: "Despesa não encontrada" });
+  res.json({ success: true, despesa: mapearDespesa(atualizada[0]) });
+});
+
+app.delete("/api/variable-expenses/:id", requireUser, async (req: any, res) => {
+  // Os percentuais gravados em cada produto ficam onde estão: sem a definição,
+  // o motor de preço já para de somá-los, e recriar a despesa com o mesmo id
+  // não é possível — mas manter o dado evita perder tudo por um clique errado
+  // quando a exclusão é desfeita pelo banco.
+  const removidas = await db.delete(variableExpenses).where(and(
+    eq(variableExpenses.id, req.params.id as any),
+    eq(variableExpenses.userId, req.currentUser.id),
+  )).returning({ id: variableExpenses.id });
+
+  // Sem linha apagada, o id não é deste usuário (ou já não existe). Responder
+  // "sucesso" aqui faria a tela de quem tentou apagar a despesa de outra conta
+  // remover o item da lista dela como se tivesse funcionado.
+  if (removidas.length === 0) return res.status(404).json({ error: "Despesa não encontrada" });
+  res.json({ success: true });
+});
+
 app.get("/api/fixed-costs", requireUser, async (req: any, res) => {
   const costs = await db.select().from(fixedCosts).where(eq(fixedCosts.userId, req.currentUser.id));
   res.json(costs.map(c => ({
@@ -699,7 +1034,7 @@ app.post("/api/snapshots", requireUser, async (req: any, res) => {
 });
 
 async function checkProductLimit(req: any, res: any, next: any) {
-  if (await isFreeModeEnabled()) return next();
+  if (await semLimiteDePlano()) return next();
   const plan = PLANS[req.currentUser.planId as PlanId] || PLANS.basico;
   const userProducts = await db.select().from(products).where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
   if (userProducts.length >= plan.productLimit) {
@@ -708,9 +1043,14 @@ async function checkProductLimit(req: any, res: any, next: any) {
   next();
 }
 
-app.get("/api/products", requireUser, async (req: any, res) => {
-  const myProducts = await db.select().from(products).where(eq(products.userId, req.currentUser.id));
-  res.json(myProducts.map(p => ({
+/**
+ * Forma como o produto trafega para o cliente. Existe uma vez só porque as
+ * quatro rotas de produto devolviam recortes diferentes do mesmo registro — e a
+ * do PUT devolvia menos campos do que a do GET, fazendo a tela perder valores
+ * depois de salvar.
+ */
+function mapearProduto(p: typeof products.$inferSelect) {
+  return {
     id: p.id,
     nome: p.name,
     cmv: p.costPrice,
@@ -724,40 +1064,120 @@ app.get("/api/products", requireUser, async (req: any, res) => {
     precoFixo: p.precoFixo || 0,
     percentualRateio: p.percentualRateio || 0,
     modoPrecificacao: p.modoPrecificacao || 'margem',
-    isSample: p.isSample
-  })));
+    despesasVariaveis: (p.despesasVariaveis as Record<string, number>) || {},
+    estrategiaId: p.estrategiaId ?? null,
+    chaveFiscal: p.chaveFiscal ?? null,
+    isSample: p.isSample,
+  };
+}
+
+/**
+ * Campos graváveis de um produto, a partir do corpo da requisição.
+ *
+ * `salePrice` é o preço de venda do cadastro e `precoFixo` é o preço que o
+ * usuário travou na tela de precificação. São coisas diferentes: o sync antigo
+ * gravava `precoFixo ?? precoVenda` em `salePrice`, e como `??` só cai para o
+ * próximo em null/undefined, todo produto no modo 'margem' (precoFixo = 0)
+ * tinha o preço de cadastro zerado no primeiro sync — o que desabilitava de vez
+ * o botão "Restaurar valor de venda do cadastro".
+ */
+function camposDoProduto(body: any) {
+  const despesas = body.despesasVariaveis;
+  return {
+    name: body.nome ?? body.name ?? "Novo Produto",
+    costPrice: Number(body.cmv ?? body.custo ?? body.costPrice ?? 0) || 0,
+    salePrice: Number(body.precoVenda ?? body.salePrice ?? 0) || 0,
+    projectedSales: Number(body.vendasProjetadas ?? body.projectedSales ?? 0) || 0,
+    imposto: Number(body.imposto ?? 0) || 0,
+    taxaCartao: Number(body.taxaCartao ?? 0) || 0,
+    comissao: Number(body.comissao ?? 0) || 0,
+    margem: Number(body.margem ?? 0) || 0,
+    precoIdeal: Number(body.precoIdeal ?? 0) || 0,
+    precoFixo: Number(body.precoFixo ?? 0) || 0,
+    percentualRateio: Number(body.percentualRateio ?? 0) || 0,
+    modoPrecificacao: body.modoPrecificacao === 'preco' ? 'preco' : 'margem',
+    despesasVariaveis: (despesas && typeof despesas === 'object' && !Array.isArray(despesas))
+      ? despesas as Record<string, number>
+      : {},
+    // String vazia vira null: é o que a tela manda quando o usuário escolhe
+    // "Personalizado" no seletor de estratégia.
+    estrategiaId: typeof body.estrategiaId === 'string' && body.estrategiaId ? body.estrategiaId : null,
+  };
+}
+
+app.get("/api/products", requireUser, async (req: any, res) => {
+  // Ordem explícita: sem ela o Postgres devolve na ordem física das linhas, e a
+  // lista do usuário embaralhava a cada reload.
+  const myProducts = await db.select().from(products)
+    .where(eq(products.userId, req.currentUser.id))
+    .orderBy(asc(products.createdAt), asc(products.id));
+  res.json(myProducts.map(mapearProduto));
 });
 
+/**
+ * Salva o mix inteiro de uma vez, vindo da tela de Preços em Lote.
+ *
+ * A versão anterior apagava TODOS os produtos do usuário e reinseria a lista.
+ * Isso gerava um id novo para cada produto a cada salvamento, enquanto o
+ * cliente seguia com os ids antigos em memória — cliente e banco divergiam no
+ * primeiro caractere digitado, e qualquer coisa que referenciasse produto por
+ * id passava a apontar para o vazio no reload seguinte. Além disso, duas
+ * digitações próximas disparavam dois delete-all concorrentes sobre a mesma
+ * tabela.
+ *
+ * Agora é uma conciliação: atualiza quem já existe (mantendo o id), insere quem
+ * é novo e remove só o que sumiu da lista.
+ */
 app.post("/api/products/sync", requireUser, async (req: any, res) => {
   try {
     const incomingProducts = req.body;
     if (!Array.isArray(incomingProducts)) {
       return res.status(400).json({ error: "Invalid data format" });
     }
-    
+
+    const userId = req.currentUser.id;
+
     await db.transaction(async (tx: any) => {
-      await tx.delete(products).where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
-      
+      const existentes = await tx.select({ id: products.id }).from(products)
+        .where(and(eq(products.userId, userId), eq(products.isSample, false)));
+      const idsExistentes = new Set<string>(existentes.map((p: any) => String(p.id)));
+
+      const idsMantidos = new Set<string>();
+
       for (const p of incomingProducts) {
-        await tx.insert(products).values({
-          userId: req.currentUser.id,
-          name: p.nome || p.name,
-          costPrice: p.cmv ?? p.custo ?? p.costPrice ?? 0,
-          salePrice: p.precoFixo ?? p.precoVenda ?? p.salePrice ?? 0,
-          projectedSales: p.vendasProjetadas ?? p.projectedSales ?? 0,
-          imposto: p.imposto ?? 0,
-          taxaCartao: p.taxaCartao ?? 0,
-          comissao: p.comissao ?? 0,
-          margem: p.margem ?? 0,
-          precoIdeal: p.precoIdeal ?? 0,
-          precoFixo: p.precoFixo ?? 0,
-          percentualRateio: p.percentualRateio ?? 0,
-          modoPrecificacao: p.modoPrecificacao ?? 'margem',
-          isSample: false
-        });
+        const campos = camposDoProduto(p);
+        const id = typeof p?.id === "string" ? p.id : null;
+
+        if (id && idsExistentes.has(id)) {
+          idsMantidos.add(id);
+          await tx.update(products)
+            .set({ ...campos, updatedAt: new Date() })
+            .where(and(eq(products.id, id), eq(products.userId, userId)));
+          continue;
+        }
+
+        // Produto que ainda não existe no banco (criado offline, ou vindo do
+        // modo visitante depois do login). O id local não serve como id do
+        // banco, então nasce um novo e a resposta devolve a lista conciliada
+        // para o cliente adotar os ids de verdade.
+        const [criado] = await tx.insert(products)
+          .values({ userId, ...campos, isSample: false })
+          .returning({ id: products.id });
+        idsMantidos.add(criado.id);
+      }
+
+      const removidos: string[] = [...idsExistentes].filter(id => !idsMantidos.has(id));
+      if (removidos.length > 0) {
+        await tx.delete(products)
+          .where(and(eq(products.userId, userId), inArray(products.id, removidos)));
       }
     });
-    res.json({ success: true });
+
+    const atualizados = await db.select().from(products)
+      .where(eq(products.userId, userId))
+      .orderBy(asc(products.createdAt), asc(products.id));
+
+    res.json({ success: true, products: atualizados.map(mapearProduto) });
   } catch (error) {
     res.status(500).json({ error: "Erro ao sincronizar produtos" });
   }
@@ -766,50 +1186,18 @@ app.post("/api/products/sync", requireUser, async (req: any, res) => {
 app.post("/api/products", requireUser, checkProductLimit, async (req: any, res) => {
   const newProduct = await db.insert(products).values({
     userId: req.currentUser.id,
-    name: req.body.nome || req.body.name || "Novo Produto",
-    costPrice: req.body.cmv || req.body.costPrice || req.body.custo || 0,
-    salePrice: req.body.precoVenda || req.body.salePrice || 0,
-    projectedSales: req.body.vendasProjetadas || req.body.projectedSales || 0,
+    ...camposDoProduto(req.body),
     isSample: false
   }).returning();
-  
-  const p = newProduct[0];
-  res.json({ success: true, product: {
-    id: p.id,
-    nome: p.name,
-    cmv: p.costPrice,
-    precoVenda: p.salePrice,
-    vendasProjetadas: p.projectedSales,
-    isSample: p.isSample
-  }});
+
+  res.json({ success: true, product: mapearProduto(newProduct[0]) });
 });
 app.put("/api/products/:id", requireUser, async (req: any, res) => {
   const updated = await db.update(products)
-    .set({
-      name: req.body.nome || req.body.name,
-      costPrice: req.body.cmv ?? req.body.costPrice,
-      salePrice: req.body.precoFixo ?? req.body.precoVenda ?? req.body.salePrice,
-      projectedSales: req.body.vendasProjetadas ?? req.body.projectedSales,
-      imposto: req.body.imposto ?? 0,
-      taxaCartao: req.body.taxaCartao ?? 0,
-      comissao: req.body.comissao ?? 0,
-      margem: req.body.margem ?? 0,
-      precoIdeal: req.body.precoIdeal ?? 0,
-      precoFixo: req.body.precoFixo ?? 0,
-      percentualRateio: req.body.percentualRateio ?? 0,
-      modoPrecificacao: req.body.modoPrecificacao ?? 'margem'
-    })
+    .set({ ...camposDoProduto(req.body), updatedAt: new Date() })
     .where(and(eq(products.id, req.params.id as any), eq(products.userId, req.currentUser.id))).returning();
   if (updated.length > 0) {
-    const p = updated[0];
-    res.json({ success: true, product: {
-      id: p.id,
-      nome: p.name,
-      cmv: p.costPrice,
-      precoVenda: p.salePrice,
-      vendasProjetadas: p.projectedSales,
-      isSample: p.isSample
-    }});
+    res.json({ success: true, product: mapearProduto(updated[0]) });
   } else res.status(404).json({ error: "Produto não encontrado" });
 });
 app.delete("/api/products/:id", requireUser, async (req: any, res) => {
@@ -823,7 +1211,7 @@ app.delete("/api/products/:id", requireUser, async (req: any, res) => {
 });
 
 async function requireExcelImport(req: any, res: any, next: any) {
-  if (await isFreeModeEnabled()) return next();
+  if (await semLimiteDePlano()) return next();
   const plan = PLANS[req.currentUser.planId as PlanId] || PLANS.basico;
   if (!plan.excelImport) {
     return res.status(403).json({ error: "Seu plano atual não permite importação via Excel." });
@@ -1361,10 +1749,25 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
   const jaResolvidas = new Set<string>([...decididas, ...conversoesPendentes.keys()]);
   const sugestoesNovas = sugerirVinculos(produtos, { jaResolvidas });
 
+  // Elasticidade-preço de cada produto, do próprio histórico. A série é a mesma
+  // que a tela já mostra: um ponto por competência com venda. Em boa parte dos
+  // casos a resposta é "não dá para dizer", e é ela que vai para a tela — um
+  // coeficiente mal estimado é pior que nenhum, porque parece preciso.
+  const produtosComElasticidade = produtos.map(p => ({
+    ...p,
+    elasticidade: estimarElasticidade(
+      p.periodos.map(per => ({
+        competencia: per.competencia,
+        preco: per.precoMedio,
+        quantidade: per.quantidadeVendida,
+      }))
+    ),
+  }));
+
   const competencias = [...new Set(linhas.map((l: any) => l.competencia))].sort();
   res.json({
     competencias,
-    produtos,
+    produtos: produtosComElasticidade,
     vinculos: vinculos.map((v: any) => ({
       id: v.id,
       chaveOrigem: v.chaveOrigem,
@@ -1384,6 +1787,115 @@ app.get("/api/fiscal/resumo", requireUser, async (req: any, res) => {
 // ---------------------------------------------------------------------------
 // Vínculos entre produtos com unidades diferentes (fardo × unidade)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Conciliação entre o cadastro e as notas
+// ---------------------------------------------------------------------------
+//
+// Produtos aplicados a partir de uma nota já nascem com `chave_fiscal`. Esta
+// rota existe para o catálogo anterior — digitado à mão ou vindo de planilha —
+// que precisa ser amarrado uma vez. Propõe; quem confirma é o usuário.
+
+/** Reconstrói o resumo fiscal do usuário, já com os vínculos de embalagem. */
+async function produtosFiscaisDoUsuario(userId: string) {
+  const linhas = await db.select().from(fiscalItems).where(eq(fiscalItems.userId, userId));
+  if (linhas.length === 0) return [];
+
+  const vinculos = await db.select().from(fiscalProductLinks)
+    .where(eq(fiscalProductLinks.userId, userId));
+  const confirmados = vinculos.filter((v: any) => v.status === "confirmado" && v.origem !== "nota");
+
+  const itens: ItemComContexto[] = linhas.map((l: any) => ({
+    direcao: l.direcao,
+    competencia: l.competencia,
+    item: l as any,
+  }));
+
+  return resumirPorProdutoPeriodo(aplicarVinculos(itens, confirmados as any))
+    .map(p => ({ chaveProduto: p.chaveProduto, descricao: p.descricao, ean: p.ean }));
+}
+
+app.get("/api/fiscal/conciliacao", requireUser, async (req: any, res) => {
+  const userId = req.currentUser.id;
+
+  const cadastro = await db.select().from(products)
+    .where(and(eq(products.userId, userId), eq(products.isSample, false)))
+    .orderBy(asc(products.createdAt), asc(products.id));
+
+  const fiscais = await produtosFiscaisDoUsuario(userId);
+
+  const sugestoes = sugerirConciliacao(
+    cadastro.map(p => ({ id: p.id, nome: p.name, chaveFiscal: p.chaveFiscal })),
+    fiscais
+  );
+
+  res.json({
+    sugestoes,
+    // Para o seletor manual: tudo que ainda não tem dono.
+    disponiveis: fiscais.filter(f => !cadastro.some(p => p.chaveFiscal === f.chaveProduto)),
+    totalCadastro: cadastro.length,
+    totalConciliados: cadastro.filter(p => p.chaveFiscal).length,
+  });
+});
+
+app.post("/api/fiscal/conciliacao", requireUser, async (req: any, res) => {
+  const userId = req.currentUser.id;
+  const pedidos: any[] = Array.isArray(req.body?.vinculos) ? req.body.vinculos : [];
+  if (pedidos.length === 0) return res.status(400).json({ error: "Nenhum vínculo informado." });
+
+  const cadastro = await db.select().from(products)
+    .where(and(eq(products.userId, userId), eq(products.isSample, false)));
+  const porId = new Map(cadastro.map((p: any) => [p.id as string, p]));
+
+  // Chaves que já têm dono não podem ser reatribuídas nesta mesma leva sem que
+  // o dono anterior seja liberado antes — é o que mantém a relação 1:1.
+  const tomadas = new Set<string>(
+    cadastro.map((p: any) => p.chaveFiscal).filter((c: any): c is string => !!c)
+  );
+
+  let vinculados = 0;
+  let desvinculados = 0;
+  const recusados: { produtoId: string; motivo: string }[] = [];
+
+  for (const pedido of pedidos) {
+    const produtoId = String(pedido?.produtoId ?? "").trim();
+    const chave = String(pedido?.chaveProduto ?? "").trim();
+    const produto: any = porId.get(produtoId);
+
+    if (!produto) {
+      recusados.push({ produtoId, motivo: "Produto não encontrado." });
+      continue;
+    }
+
+    // Chave vazia desfaz o vínculo — é como o usuário corrige um casamento errado.
+    if (!chave) {
+      if (produto.chaveFiscal) {
+        tomadas.delete(produto.chaveFiscal);
+        await db.update(products).set({ chaveFiscal: null, updatedAt: new Date() })
+          .where(and(eq(products.id, produtoId as any), eq(products.userId, userId)));
+        produto.chaveFiscal = null;
+        desvinculados += 1;
+      }
+      continue;
+    }
+
+    if (produto.chaveFiscal === chave) continue;
+
+    if (tomadas.has(chave)) {
+      recusados.push({ produtoId, motivo: "Esse produto das notas já está vinculado a outro item do cadastro." });
+      continue;
+    }
+
+    if (produto.chaveFiscal) tomadas.delete(produto.chaveFiscal);
+    tomadas.add(chave);
+    await db.update(products).set({ chaveFiscal: chave, updatedAt: new Date() })
+      .where(and(eq(products.id, produtoId as any), eq(products.userId, userId)));
+    produto.chaveFiscal = chave;
+    vinculados += 1;
+  }
+
+  res.json({ success: true, vinculados, desvinculados, recusados });
+});
 
 app.post("/api/fiscal/vinculos", requireUser, async (req: any, res) => {
   try {
@@ -1504,8 +2016,17 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
     const existentes = await db.select().from(products)
       .where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
 
+    // O elo forte é a chave fiscal, gravada na primeira vez que este produto
+    // recebeu valores de uma nota. O nome é só a rede de segurança para o que
+    // foi cadastrado antes de existir chave — e é uma rede furada: renomear o
+    // produto no cadastro fazia a próxima aplicação não encontrar nada e criar
+    // um segundo produto, silenciosamente.
+    const porChave = new Map<string, any>();
     const porNome = new Map<string, any>();
-    for (const p of existentes) porNome.set(String(p.name).trim().toLowerCase(), p);
+    for (const p of existentes) {
+      if (p.chaveFiscal) porChave.set(p.chaveFiscal, p);
+      porNome.set(String(p.name).trim().toLowerCase(), p);
+    }
 
     let criados = 0;
     let atualizados = 0;
@@ -1517,12 +2038,16 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
       const cmv = Number(escolha.cmv) || 0;
       const precoVenda = Number(escolha.precoVenda) || 0;
       const vendasProjetadas = Number(escolha.vendasProjetadas) || 0;
-      const existente = porNome.get(nome.toLowerCase());
+      const chaveFiscal = String(escolha.chaveProduto ?? "").trim() || null;
+      const existente = (chaveFiscal && porChave.get(chaveFiscal)) || porNome.get(nome.toLowerCase());
 
       if (existente) {
         // Só sobrescreve o que a importação de fato apurou: um produto sem
         // compra no período não pode zerar o CMV que já estava cadastrado.
         const patch: any = {};
+        // Produto cadastrado antes de existir chave: este é o momento de
+        // amarrá-lo, e a partir daqui o nome pode mudar à vontade.
+        if (chaveFiscal && !existente.chaveFiscal) patch.chaveFiscal = chaveFiscal;
         if (cmv > 0) patch.costPrice = cmv;
         if (precoVenda > 0) {
           patch.salePrice = precoVenda;
@@ -1539,7 +2064,7 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
           semEspaco.push(nome);
           continue;
         }
-        await db.insert(products).values({
+        const [novo] = await db.insert(products).values({
           userId: req.currentUser.id,
           name: nome,
           costPrice: cmv,
@@ -1547,8 +2072,13 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
           projectedSales: vendasProjetadas,
           precoFixo: precoVenda,
           modoPrecificacao: precoVenda > 0 ? "preco" : "margem",
+          chaveFiscal,
           isSample: false,
-        });
+        }).returning();
+        // Entra no mapa para que a mesma chave, repetida na seleção, atualize
+        // este produto em vez de criar outro.
+        if (chaveFiscal) porChave.set(chaveFiscal, novo);
+        porNome.set(nome.toLowerCase(), novo);
         criados += 1;
       }
     }
@@ -1560,6 +2090,7 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
 });
 
 app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
+  if (!PLANOS_ATIVOS) return res.status(404).json({ error: "Planos não estão disponíveis." });
   try {
     if (await isFreeModeEnabled()) {
       return res.status(400).json({ error: "Pagamentos estão temporariamente desativados. Sua conta já tem acesso ilimitado gratuito no momento." });

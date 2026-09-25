@@ -3,43 +3,27 @@ import { Link } from 'react-router-dom';
 import { Tooltip as RechartsTooltip, ResponsiveContainer, Legend, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, ShoppingBag, Percent, Target, Box, FileText, Info, Edit2, Check, X, AlertTriangle } from 'lucide-react';
 import { useAppContext, ProdutoItem } from '../context/AppContext';
-import { calculateSellingPrice } from '../domain/pricing';
+import { calcularMix, type DespesaVariavelDef, type EstrategiaDef } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 import { exportToExcel } from '../utils/export';
 import CostCompositionChart from '../components/CostCompositionChart';
 
 // Recalcula faturamento e lucro líquido de um snapshot salvo (ou dos dados
-// atuais), usada tanto para a comparação "vs mês passado" quanto para a
-// série de Evolução Mensal — mesma fórmula usada no restante do dashboard.
-function calcSnapshotTotals(custoFixoTotalSnap: number, produtosSnap: ProdutoItem[]) {
-  let faturamento = 0;
-  let margemContribuicaoTotalSnap = 0;
-  produtosSnap.forEach(p => {
-    const vendas = p.vendasProjetadas || 0;
-    const imposto = p.imposto || 0;
-    const taxa = p.taxaCartao || 0;
-    const com = p.comissao || 0;
-    const margem = p.margem || 0;
-    const rateio = p.percentualRateio || 0;
-
-    const valorRateadoCF = (rateio / 100) * custoFixoTotalSnap;
-    const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
-
-    const preco = p.modoPrecificacao === 'preco'
-      ? (p.precoFixo || 0)
-      : calculateSellingPrice(p.cmv, custoFixoUnitario, imposto / 100, taxa / 100, com / 100, margem / 100);
-    faturamento += preco * vendas;
-
-    const valorImposto = preco * (imposto / 100);
-    const valorTaxasCom = preco * ((taxa + com) / 100);
-    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom;
-    margemContribuicaoTotalSnap += margemContribuicao * vendas;
-  });
-  return { faturamento, lucro: margemContribuicaoTotalSnap - custoFixoTotalSnap };
+// atuais), usada tanto para a comparação "vs mês passado" quanto para a série
+// de Evolução Mensal. Passa pelo mesmo motor das telas de precificação, então
+// a comparação com o mês passado usa exatamente a conta de hoje.
+function calcSnapshotTotals(
+  custoFixoTotalSnap: number,
+  produtosSnap: ProdutoItem[],
+  definicoes: DespesaVariavelDef[],
+  estrategias: EstrategiaDef[]
+) {
+  const mix = calcularMix(produtosSnap, custoFixoTotalSnap, definicoes, estrategias);
+  return { faturamento: mix.receitaTotal, lucro: mix.lucroLiquidoTotal };
 }
 
 export default function Dashboard() {
-  const { produtos, custosFixos, saveProduto, snapshots, createSnapshot } = useAppContext();
+  const { produtos, custosFixos, saveProduto, snapshots, createSnapshot, despesasVariaveis, estrategias } = useAppContext();
 
   const [metaLucro, setMetaLucro] = useState<number>(0);
   const [metaModalOpen, setMetaModalOpen] = useState<boolean>(false);
@@ -60,65 +44,32 @@ export default function Dashboard() {
 
   const custoFixoTotal = custosFixos.reduce((a, b) => a + b.valor, 0);
 
-  let receitaEstimada = 0;
-  let margemContribuicaoTotal = 0;
-  
-  let custosVariaveisTotais = 0;
-  let impostoValorTotal = 0;
-  let taxasComissoesValorTotal = 0;
+  // Um único cálculo para a tela inteira — o mesmo que o Mix de Preços usa.
+  const mix = calcularMix(produtos, custoFixoTotal, despesasVariaveis, estrategias);
 
-  let produtosComPrejuizo: { nome: string; margem: number }[] = [];
+  const {
+    receitaTotal: receitaEstimada,
+    margemContribuicaoTotal,
+    custosVariaveisTotais,
+    impostoValorTotal,
+    despesasValorTotal: taxasComissoesValorTotal,
+    lucroLiquidoTotal,
+    percMargemContribuicao,
+    percLucroLiquido,
+    pontoEquilibrioFaturamento,
+    custoFixoDescoberto,
+    custoFixoNaoAbsorvido,
+    custoFixoNaoRateado,
+    produtosComRateioOcioso,
+  } = mix;
 
+  const produtosComPrejuizo = mix.produtos
+    .filter(p => p.margemContribuicao < 0)
+    .map(p => ({ nome: p.nome, margem: p.margemContribuicao }));
 
   const mcUnitMap: Record<string, number> = {};
+  mix.produtos.forEach(p => { mcUnitMap[p.id] = p.margemContribuicao; });
 
-  produtos.forEach(p => {
-    const vendas = p.vendasProjetadas || 0;
-    const imposto = p.imposto || 0;
-    const taxa = p.taxaCartao || 0;
-    const com = p.comissao || 0;
-    const margem = p.margem || 0;
-    const rateio = p.percentualRateio || 0;
-    
-    const valorRateadoCF = (rateio / 100) * custoFixoTotal;
-    const custoFixoUnitario = vendas > 0 ? (valorRateadoCF / vendas) : 0;
-    
-    const despesasVariaveisPerc = imposto + taxa + com;
-    
-    let preco = 0;
-    let margemReal = margem;
-    
-    if (p.modoPrecificacao === 'preco') {
-      preco = p.precoFixo || 0;
-      const custoTot = p.cmv + custoFixoUnitario;
-      const descontosVariaveis = preco * (despesasVariaveisPerc / 100);
-      const lucroReais = preco - custoTot - descontosVariaveis;
-      margemReal = preco > 0 ? (lucroReais / preco) * 100 : 0;
-    } else {
-      preco = calculateSellingPrice(p.cmv, custoFixoUnitario, imposto/100, taxa/100, com/100, margem/100);
-    }
-    
-    receitaEstimada += preco * vendas;
-    custosVariaveisTotais += p.cmv * vendas;
-    
-    const valorImposto = preco * (imposto / 100);
-    const valorTaxasCom = preco * ((taxa + com) / 100);
-    
-    impostoValorTotal += valorImposto * vendas;
-    taxasComissoesValorTotal += valorTaxasCom * vendas;
-    
-    
-    const margemContribuicao = preco - p.cmv - valorImposto - valorTaxasCom;
-    if (margemContribuicao < 0) {
-      produtosComPrejuizo.push({ nome: p.nome, margem: margemContribuicao });
-    }
-
-    mcUnitMap[p.id] = margemContribuicao;
-    
-    margemContribuicaoTotal += margemContribuicao * vendas;
-  });
-
-  const lucroLiquidoTotal = margemContribuicaoTotal - custoFixoTotal;
   const totalRateio = produtos.filter(p => p.cmv > 0).reduce((acc, p) => acc + (p.percentualRateio || 0), 0);
   const rateioDiff = Math.abs(100 - totalRateio);
   const isRateioIncompleto = rateioDiff > 0.1 && totalRateio < 100;
@@ -127,11 +78,7 @@ export default function Dashboard() {
 
   const despesasVariaveisTotal = impostoValorTotal + taxasComissoesValorTotal;
 
-  const percMargemContribuicao = receitaEstimada > 0 ? (margemContribuicaoTotal / receitaEstimada) * 100 : 0;
-  const percLucroLiquido = receitaEstimada > 0 ? (lucroLiquidoTotal / receitaEstimada) * 100 : 0;
-  
-  // Ponto de Equilibrio Global = Custo Fixo / Indice de Margem de Contribuicao (em Receita)
-  const pontoEquilibrioFaturamento = percMargemContribuicao > 0 ? (custoFixoTotal / (percMargemContribuicao / 100)) : 0;
+
 
   // Mesma ordem/cores usadas em Formação de Preço e Mix de Preços para "para
   // onde vai cada real" — ver CostCompositionChart.
@@ -139,7 +86,7 @@ export default function Dashboard() {
     { name: 'Custo Variável (CMV)', value: Math.max(0, custosVariaveisTotais) },
     { name: 'Custo Fixo', value: Math.max(0, custoFixoTotal) },
     { name: 'Impostos', value: Math.max(0, impostoValorTotal) },
-    { name: 'Taxas & Comissões', value: Math.max(0, taxasComissoesValorTotal) },
+    { name: 'Taxas & Despesas', value: Math.max(0, taxasComissoesValorTotal) },
     { name: 'Lucro Líquido', value: Math.max(0, lucroLiquidoTotal) },
   ].map(item => ({ ...item, value: Number(item.value.toFixed(2)) }));
 
@@ -197,7 +144,7 @@ export default function Dashboard() {
 
   if (lastMonthSnapshot) {
     lastCustoFixo = lastMonthSnapshot.custoFixoTotal;
-    const lastTotals = calcSnapshotTotals(lastCustoFixo, lastMonthSnapshot.produtos);
+    const lastTotals = calcSnapshotTotals(lastCustoFixo, lastMonthSnapshot.produtos, despesasVariaveis, estrategias);
     lastFaturamento = lastTotals.faturamento;
     lastLucro = lastTotals.lucro;
     const lastMargemContribuicaoTotal = lastLucro + lastCustoFixo;
@@ -209,7 +156,7 @@ export default function Dashboard() {
   const trendData = [...snapshots]
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
     .map(s => {
-      const totals = calcSnapshotTotals(s.custoFixoTotal, s.produtos);
+      const totals = calcSnapshotTotals(s.custoFixoTotal, s.produtos, despesasVariaveis, estrategias);
       return {
         label: s.label || new Date(s.createdAt).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
         faturamento: totals.faturamento,
@@ -234,36 +181,21 @@ export default function Dashboard() {
     return <span className={`text-xs font-medium ml-2 inline-flex items-center ${color}`}><Icon className="w-3 h-3 mr-0.5" />{Math.abs(val).toFixed(1)}%</span>
   };
 
-  // Scenario Simulator Calculations
-  let simFat = 0;
-  let simMC = 0;
+  // Simulador de cenário: aplica as variações em cima dos produtos e roda o
+  // mesmo motor, em vez de reimplementar a conta com as variações embutidas.
   const simCustoFixo = custoFixoTotal * (1 + varCustoFixo / 100);
-
-  produtos.forEach(p => {
-    const pCmv = p.cmv * (1 + varCmv / 100);
-    const pVendas = (p.vendasProjetadas || 0) * (1 + varVendas / 100);
-    const imposto = p.imposto || 0;
-    const taxa = p.taxaCartao || 0;
-    const com = p.comissao || 0;
-    const margem = p.margem || 0;
-    const rateio = p.percentualRateio || 0;
-
-    const valorRateadoCF = (rateio / 100) * simCustoFixo;
-    const custoFixoUnitario = pVendas > 0 ? (valorRateadoCF / pVendas) : 0;
-
-    let preco = 0;
-    if (p.modoPrecificacao === 'preco') {
-      preco = p.precoFixo || 0;
-    } else {
-      preco = calculateSellingPrice(pCmv, custoFixoUnitario, imposto/100, taxa/100, com/100, margem/100);
-    }
-    simFat += preco * pVendas;
-
-    const valorImposto = preco * (imposto / 100);
-    const valorTaxasCom = preco * ((taxa + com) / 100);
-    const margemContribuicao = preco - pCmv - valorImposto - valorTaxasCom;
-    simMC += margemContribuicao * pVendas;
-  });
+  const simMix = calcularMix(
+    produtos.map(p => ({
+      ...p,
+      cmv: p.cmv * (1 + varCmv / 100),
+      vendasProjetadas: (p.vendasProjetadas || 0) * (1 + varVendas / 100),
+    })),
+    simCustoFixo,
+    despesasVariaveis,
+    estrategias
+  );
+  const simFat = simMix.receitaTotal;
+  const simMC = simMix.margemContribuicaoTotal;
   const simLucro = simMC - simCustoFixo;
 
   const somaMCUnits = produtos.reduce((acc, p) => acc + (mcUnitMap[p.id] || 0), 0);
@@ -333,6 +265,39 @@ export default function Dashboard() {
         </div>
       )}
 
+
+      {/* Custo fixo que nenhum preço cobre. Enquanto isto aparecer, a soma das
+          margens "no alvo" de cada produto no Mix é maior que o resultado real
+          aqui embaixo — e esta caixa diz exatamente por quanto e por quê. */}
+      {custoFixoDescoberto > 0 && (
+        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">
+              {formatCurrency(custoFixoDescoberto)} de custo fixo não estão embutidos em nenhum preço.
+              {' '}Os preços de hoje cobrem {formatCurrency(custoFixoTotal - custoFixoDescoberto)} dos{' '}
+              {formatCurrency(custoFixoTotal)} — o restante sai direto do resultado abaixo.
+            </p>
+            <ul className="text-sm mt-2 space-y-1 list-disc list-inside">
+              {custoFixoNaoAbsorvido > 0 && (
+                <li>
+                  {formatCurrency(custoFixoNaoAbsorvido)} foram rateados para{' '}
+                  {produtosComRateioOcioso.length === 1
+                    ? <strong>{produtosComRateioOcioso[0].nome}</strong>
+                    : <>{produtosComRateioOcioso.length} produtos</>}
+                  {' '}sem vendas projetadas — sem vendas, a cota não vira preço.
+                </li>
+              )}
+              {custoFixoNaoRateado > 0 && (
+                <li>{formatCurrency(custoFixoNaoRateado)} não foram rateados para produto nenhum.</li>
+              )}
+            </ul>
+            <Link to="/mix-preco-lote" className="text-sm font-semibold underline mt-2 inline-block hover:text-red-900">
+              Corrigir no Mix de Preços
+            </Link>
+          </div>
+        </div>
+      )}
 
       {(isRateioIncompleto || isRateioExcedido) && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-lg flex items-start gap-3">

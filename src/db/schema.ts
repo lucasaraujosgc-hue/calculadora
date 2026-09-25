@@ -38,10 +38,100 @@ export const products = pgTable('products', {
   precoFixo: doublePrecision('preco_fixo').default(0),
   percentualRateio: doublePrecision('percentual_rateio').default(0),
   modoPrecificacao: text('modo_precificacao').default('margem'),
+  /**
+   * Percentuais das despesas variáveis que o próprio usuário criou, no formato
+   * { [id da despesa]: percentual }. Fica em JSONB, e não numa tabela de
+   * ligação, porque é sempre lido junto com o produto e nunca consultado
+   * isoladamente — e porque assim o /api/products/sync continua sendo uma
+   * escrita só por produto.
+   */
+  despesasVariaveis: jsonb('despesas_variaveis').default({}).notNull(),
+  /**
+   * Estratégia de margem que o produto segue. Quando preenchida, a margem vem
+   * dela e o campo `margem` abaixo fica só como último valor conhecido — é o
+   * que permite voltar para "Personalizado" sem o preço dar um salto.
+   * `null` = Personalizado: vale a margem do próprio produto.
+   */
+  estrategiaId: uuid('estrategia_id'),
+  /**
+   * Produto correspondente nas notas fiscais (`fiscal_items.chave_produto`).
+   *
+   * Gravado quando o usuário aplica os valores de uma nota a este produto —
+   * momento em que o casamento é inequívoco, porque foi ele quem escolheu a
+   * linha. Daí em diante o elo é o id, não o nome: renomear o produto no
+   * cadastro deixa de desfazer o vínculo.
+   *
+   * Sem índice único de propósito. A chave só é escrita pela rota de aplicação,
+   * nunca pelo cliente, então duas linhas com a mesma chave não têm como
+   * aparecer pela API — e uma constraint aqui transformaria um caso de dado
+   * torto num erro 500 no meio de uma importação.
+   */
+  chaveFiscal: text('chave_fiscal'),
   isSample: boolean('is_sample').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+}, (t) => ({
+  porUsuarioChaveFiscal: index('products_user_chave_fiscal_idx').on(t.userId, t.chaveFiscal),
+}));
+
+/**
+ * Despesas variáveis que cada usuário cria para si (ex.: "Frete", "Embalagem",
+ * "Marketplace"), no lugar do antigo campo único "Outros".
+ *
+ * É estritamente por usuário: a linha carrega o `userId` e toda consulta filtra
+ * por ele, então uma despesa criada por uma empresa não aparece — nem entra no
+ * preço — de nenhuma outra. O nome é único por usuário para não haver dois
+ * "Frete" na mesma tela.
+ */
+export const variableExpenses = pgTable('variable_expenses', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  name: text('name').notNull(),
+  /** Ordem de exibição, para o usuário arrumar as colunas do Mix. */
+  position: integer('position').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  nomeUnicoPorUsuario: unique('variable_expenses_user_name_key').on(t.userId, t.name),
+  porUsuario: index('variable_expenses_user_idx').on(t.userId),
+}));
+
+/**
+ * Estratégias de margem de cada usuário.
+ *
+ * Em vez de uma margem solta por produto (ou, pior, a mesma margem para o
+ * catálogo inteiro), o lojista define poucas faixas com nome — "Atração",
+ * "Padrão", "Margem alta" — e diz a que faixa cada produto pertence. Mudar a
+ * política de preço do item de atração vira uma edição, não trezentas.
+ *
+ * Toda conta nasce com as três faixas padrão (ver `ESTRATEGIAS_PADRAO` no
+ * servidor), e daí o usuário renomeia, ajusta os percentuais, cria ou apaga.
+ * Como tudo é filtrado por `userId`, as faixas de uma empresa não aparecem em
+ * nenhuma outra.
+ */
+export const pricingStrategies = pgTable('pricing_strategies', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  name: text('name').notNull(),
+  /** Margem líquida alvo, em pontos percentuais (20 = 20%). */
+  margem: doublePrecision('margem').default(0).notNull(),
+  /**
+   * Margem mínima aceitável desta faixa, em pontos percentuais.
+   *
+   * Não mexe no preço sugerido — esse já entrega a margem alvo. Serve para o
+   * momento em que alguém digita um preço à mão ou dá desconto: abaixo do piso,
+   * a tela avisa. 0 significa "sem piso".
+   */
+  piso: doublePrecision('piso').default(0).notNull(),
+  /** Cor do selo na tabela do Mix, para bater o olho e enxergar o mix. */
+  cor: text('cor').default('slate').notNull(),
+  position: integer('position').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  nomeUnicoPorUsuario: unique('pricing_strategies_user_name_key').on(t.userId, t.name),
+  porUsuario: index('pricing_strategies_user_idx').on(t.userId),
+}));
 
 export const fixedCosts = pgTable('fixed_costs', {
   id: uuid('id').defaultRandom().primaryKey(),

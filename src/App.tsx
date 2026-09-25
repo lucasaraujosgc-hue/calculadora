@@ -13,7 +13,6 @@ import ReformaTributaria from './pages/ReformaTributaria';
 import VerifyEmail from './pages/VerifyEmail';
 import ResetPassword from './pages/ResetPassword';
 import AdminPanel from './pages/AdminPanel';
-import Pricing from './pages/Pricing';
 import { useAppContext } from './context/AppContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -35,7 +34,6 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/configuracoes" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-        <Route path="/planos" element={<ProtectedRoute><Pricing /></ProtectedRoute>} />
         <Route path="/formacao-preco" element={<ProtectedRoute><FormacaoPreco /></ProtectedRoute>} />
         <Route path="/mix-preco-lote" element={<ProtectedRoute><MixPrecoLote /></ProtectedRoute>} />
         <Route path="/custos-fixos" element={<ProtectedRoute><CustoFixo /></ProtectedRoute>} />

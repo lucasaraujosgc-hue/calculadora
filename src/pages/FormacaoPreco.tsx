@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { useAppContext } from '../context/AppContext';
-import { calculateSellingPrice, calculateContributionMargin } from '../domain/pricing';
+import { calcularProduto } from '../domain/pricing';
 import { formatCurrency } from '../utils/format';
 import CostCompositionChart from '../components/CostCompositionChart';
+import DespesasVariaveisManager from '../components/DespesasVariaveisManager';
+import EstrategiasManager, { SeletorEstrategia } from '../components/Estrategias';
 import {
   PainelReformaPreco,
   SeloPrecoReforma,
@@ -12,7 +14,7 @@ import {
 } from '../components/ReformaPreco';
 
 export default function FormacaoPreco() {
-  const { produtos, custosFixos, saveProduto } = useAppContext();
+  const { produtos, custosFixos, saveProduto, despesasVariaveis, estrategias } = useAppContext();
   const validProdutos = produtos.filter(p => p.cmv > 0);
   
   const [selectedProductId, setSelectedProductId] = useState<string>('');
@@ -27,6 +29,9 @@ export default function FormacaoPreco() {
   const [modoPrecificacao, setModoPrecificacao] = useState<'margem' | 'preco'>('margem');
   const [precoFixo, setPrecoFixo] = useState(0);
   const [percentualRateio, setPercentualRateio] = useState(100);
+  const [estrategiaId, setEstrategiaId] = useState<string | null>(null);
+  // Percentuais das despesas variáveis que o usuário criou, por id da despesa.
+  const [despesasProduto, setDespesasProduto] = useState<Record<string, number>>({});
 
   const custoFixoTotal = custosFixos.reduce((acc, curr) => acc + curr.valor, 0);
 
@@ -53,6 +58,8 @@ export default function FormacaoPreco() {
       if (p.comissao !== undefined) setComissao(p.comissao);
       if (p.percentualRateio !== undefined) setPercentualRateio(p.percentualRateio);
       if (p.margem !== undefined) setMargem(p.margem);
+      setDespesasProduto(p.despesasVariaveis || {});
+      setEstrategiaId(p.estrategiaId ?? null);
     }
   }, [selectedProductId, produtos]);
 
@@ -71,7 +78,9 @@ export default function FormacaoPreco() {
           precoIdeal: precoFinal,
           modoPrecificacao,
           precoFixo,
-          percentualRateio
+          percentualRateio,
+          despesasVariaveis: despesasProduto,
+          estrategiaId
         };
       }
       return p;
@@ -80,34 +89,45 @@ export default function FormacaoPreco() {
     alert('Valores salvos no produto!');
   };
 
-  // --- Calculations ---
-  const valorRateadoCF = (percentualRateio / 100) * custoFixoTotal;
-  const custoFixoUnitario = vendasProjetadas > 0 ? (valorRateadoCF / vendasProjetadas) : 0;
+  // --- Cálculos ---
+  // Toda a conta vem do motor em src/domain/pricing: é a mesma função que o
+  // Dashboard e o Mix usam, então as três telas não têm como divergir.
+  const calc = calcularProduto(
+    {
+      id: selectedProductId,
+      cmv: custo,
+      vendasProjetadas,
+      percentualRateio,
+      imposto,
+      taxaCartao,
+      comissao,
+      despesasVariaveis: despesasProduto,
+      margem,
+      estrategiaId,
+      modoPrecificacao,
+      precoFixo,
+    },
+    custoFixoTotal,
+    despesasVariaveis,
+    estrategias
+  );
 
-  const despesasVariaveisPerc = imposto + taxaCartao + comissao;
-  const totalPerc = despesasVariaveisPerc + margem;
-  const precoIdealCalculado = calculateSellingPrice(custo, custoFixoUnitario, imposto/100, taxaCartao/100, comissao/100, margem/100);
-  
-  let precoFinal = precoIdealCalculado;
-  let margemReal = margem;
-
-  if (modoPrecificacao === 'preco') {
-    precoFinal = precoFixo;
-    const custoTot = custo + custoFixoUnitario;
-    const descontosVariaveis = precoFinal * (despesasVariaveisPerc / 100);
-    const lucroLiquidoReais = precoFinal - custoTot - descontosVariaveis;
-    margemReal = precoFinal > 0 ? (lucroLiquidoReais / precoFinal) * 100 : 0;
-  }
-  
-  const valorImposto = precoFinal * (imposto / 100);
-  const valorTaxa = precoFinal * (taxaCartao / 100);
-  const valorComissao = precoFinal * (comissao / 100);
-  const valorMargem = precoFinal * (margemReal / 100);
-  
-  const margemContribuicao = precoFinal - custo - valorImposto - valorTaxa - valorComissao; 
-  
-  const isValidMargem = margemContribuicao > 0;
-  const peUnidades = isValidMargem ? (valorRateadoCF / margemContribuicao) : Infinity;
+  const {
+    valorRateadoCF,
+    custoFixoUnitario,
+    despesasPercent,
+    deducoesPercent: despesasVariaveisPerc,
+    preco: precoFinal,
+    margemReal,
+    valorImposto,
+    valorDespesas,
+    valorMargem,
+    margemContribuicao,
+    peUnidades,
+    isValidMargem,
+    margemAlvo,
+    estrategia,
+  } = calc;
 
   const vendasPorDia = vendasProjetadas / 30;
   const diasParaAtingir = (isValidMargem && vendasPorDia > 0) ? peUnidades / vendasPorDia : Infinity;
@@ -129,7 +149,7 @@ export default function FormacaoPreco() {
     cmv: custo,
     custoFixoUnitario,
     impostoPercent: imposto,
-    despesasPercent: taxaCartao + comissao,
+    despesasPercent,
     margemPercent: margemReal,
     precoAtual: precoFinal,
   });
@@ -138,7 +158,7 @@ export default function FormacaoPreco() {
     { name: 'Custo Variável (CMV)', value: custo },
     { name: 'Custo Fixo Unitário', value: custoFixoUnitario },
     { name: 'Impostos', value: valorImposto },
-    { name: 'Taxas & Comissões', value: valorTaxa + valorComissao },
+    { name: 'Taxas & Despesas', value: valorDespesas },
     { name: 'Lucro Líquido', value: valorMargem },
   ].map(item => ({ ...item, value: Number(item.value.toFixed(2)) }));
 
@@ -147,8 +167,8 @@ export default function FormacaoPreco() {
     return {
       unidades: qty,
       receita: qty * precoFinal,
-      custoTotal: custoFixoTotal + (qty * custo) + (qty * (precoFinal * ((imposto + taxaCartao + comissao)/100))),
-      lucro: (qty * precoFinal) - (custoFixoTotal + (qty * custo) + (qty * (precoFinal * ((imposto + taxaCartao + comissao)/100))))
+      custoTotal: custoFixoTotal + (qty * custo) + (qty * (precoFinal * (despesasVariaveisPerc/100))),
+      lucro: (qty * precoFinal) - (custoFixoTotal + (qty * custo) + (qty * (precoFinal * (despesasVariaveisPerc/100))))
     };
   });
 
@@ -226,14 +246,25 @@ export default function FormacaoPreco() {
                 <input type="number" value={taxaCartao} onChange={e => setTaxaCartao(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Outros (Comissão e afins) %</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Comissão (%)</label>
                 <input type="number" value={comissao} onChange={e => setComissao(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm" />
               </div>
               <div>
                 {modoPrecificacao === 'margem' ? (
                   <>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">Margem Líquida Desejada (%)</label>
-                    <input type="number" value={margem} onChange={e => setMargem(Number(e.target.value))} className="w-full px-3 py-2 border border-border rounded-md bg-primary/10 font-bold text-primary text-sm focus:ring-2 focus:ring-primary/50" />
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Margem Líquida Desejada (%)
+                    </label>
+                    {/* Com uma faixa ativa, a margem vem dela e o campo fica travado —
+                        senão haveria dois números disputando o mesmo preço. */}
+                    <input
+                      type="number"
+                      value={margemAlvo}
+                      disabled={!!estrategia}
+                      onChange={e => setMargem(Number(e.target.value))}
+                      title={estrategia ? `Definida pela estratégia ${estrategia.nome}. Escolha "Personalizado" abaixo para editar só este produto.` : undefined}
+                      className={`w-full px-3 py-2 border border-border rounded-md font-bold text-sm focus:ring-2 focus:ring-primary/50 ${estrategia ? 'bg-muted/40 text-muted-foreground cursor-not-allowed' : 'bg-primary/10 text-primary'}`}
+                    />
                   </>
                 ) : (
                   <>
@@ -242,6 +273,52 @@ export default function FormacaoPreco() {
                   </>
                 )}
               </div>
+            </div>
+
+            <div className="pt-4 border-t border-border">
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Estratégia de margem</label>
+              <SeletorEstrategia
+                produto={{
+                  id: selectedProductId, nome: '', cmv: custo,
+                  margem, estrategiaId,
+                }}
+                onChange={(updates) => {
+                  if (updates.estrategiaId !== undefined) setEstrategiaId(updates.estrategiaId);
+                  if (updates.margem !== undefined) setMargem(updates.margem);
+                }}
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                A faixa define a margem alvo. "Personalizado" libera o campo acima só para este produto.
+              </p>
+            </div>
+
+            {despesasVariaveis.length > 0 && (
+              <div className="pt-4 border-t border-border">
+                <p className="text-xs font-semibold text-foreground mb-2">Minhas despesas variáveis (%)</p>
+                <div className="grid grid-cols-2 gap-4">
+                  {despesasVariaveis.map(d => (
+                    <div key={d.id}>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1 truncate" title={d.nome}>
+                        {d.nome} (%)
+                      </label>
+                      <input
+                        type="number"
+                        value={despesasProduto[d.id] ?? 0}
+                        onChange={e => setDespesasProduto(prev => ({ ...prev, [d.id]: Number(e.target.value) }))}
+                        className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="pt-4 border-t border-border">
+              <EstrategiasManager compacto />
+            </div>
+
+            <div className="pt-4 border-t border-border">
+              <DespesasVariaveisManager compacto />
             </div>
 
             <button onClick={handleSaveToProduct} className="w-full py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-muted transition-colors mt-4">
