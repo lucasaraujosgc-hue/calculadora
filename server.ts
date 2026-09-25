@@ -67,6 +67,35 @@ export const PLANS = {
 } as const;
 export type PlanId = keyof typeof PLANS;
 
+/**
+ * Planos pagos desligados.
+ *
+ * Com `false`, a aba /planos some do menu, a rota deixa de existir, o checkout
+ * e a listagem de planos respondem 404, e nenhum limite de plano é aplicado.
+ * Esta última parte não é opcional: sem ela o usuário bate em "Limite do plano
+ * atingido (20 produtos). Faça o upgrade" e o upgrade não existe mais — um beco
+ * sem saída.
+ *
+ * Nada de pagamento foi apagado. PLANS, a tabela `payments`, o checkout e o
+ * webhook continuam no código, só inalcançáveis. Trocar para `true` traz tudo
+ * de volta como estava.
+ *
+ * O webhook do Pagar.me é a única exceção e continua aberto de propósito: um
+ * pagamento que já estava em curso quando os planos saíram do ar ainda precisa
+ * ser processado, senão fica dinheiro preso sem baixa.
+ */
+export const PLANOS_ATIVOS = false;
+
+/**
+ * Se os limites de plano valem para esta requisição.
+ *
+ * Com os planos desligados, ninguém é limitado. Com eles ligados, vale o modo
+ * gratuito que o admin controla.
+ */
+async function semLimiteDePlano(): Promise<boolean> {
+  return !PLANOS_ATIVOS || (await isFreeModeEnabled());
+}
+
 // --- Free mode toggle ---
 // Lets us take the paid option off the table temporarily (everyone gets
 // unlimited access) without deleting any of the payment code, so it can be
@@ -83,13 +112,19 @@ async function isFreeModeEnabled(): Promise<boolean> {
 // Público: lets the frontend know whether paid plans are currently active,
 // so it can hide pricing/checkout/limit nags during a free period.
 app.get("/api/settings", async (req, res) => {
-  res.json({ freeModeEnabled: await isFreeModeEnabled() });
+  // `freeModeEnabled` já é o sinal que o menu usa para esconder a aba de planos,
+  // então desligar os planos reaproveita esse caminho sem tocar no Layout.
+  res.json({
+    freeModeEnabled: await semLimiteDePlano(),
+    planosAtivos: PLANOS_ATIVOS,
+  });
 });
 
 // Público: única fonte de verdade sobre preços/limites dos planos, consumida
 // pela tela de preços no frontend para evitar duplicar (e desalinhar) esses
 // valores em dois lugares.
 app.get("/api/plans", (req, res) => {
+  if (!PLANOS_ATIVOS) return res.status(404).json({ error: "Planos não estão disponíveis." });
   res.json(Object.values(PLANS).map(p => ({
     id: p.id,
     name: p.name,
@@ -322,7 +357,7 @@ app.post("/api/register", authLimiter, async (req, res) => {
     if (existing.length > 0) return res.status(400).json({ error: "E-mail já cadastrado" });
     const passwordHash = await bcrypt.hash(parsed.password, 10);
     const isBootstrapAdmin = !!process.env.ADMIN_EMAIL && parsed.email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase();
-    const freeMode = await isFreeModeEnabled();
+    const freeMode = await semLimiteDePlano();
 
     const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
     const newUser = await db.insert(users).values({
@@ -999,7 +1034,7 @@ app.post("/api/snapshots", requireUser, async (req: any, res) => {
 });
 
 async function checkProductLimit(req: any, res: any, next: any) {
-  if (await isFreeModeEnabled()) return next();
+  if (await semLimiteDePlano()) return next();
   const plan = PLANS[req.currentUser.planId as PlanId] || PLANS.basico;
   const userProducts = await db.select().from(products).where(and(eq(products.userId, req.currentUser.id), eq(products.isSample, false)));
   if (userProducts.length >= plan.productLimit) {
@@ -1176,7 +1211,7 @@ app.delete("/api/products/:id", requireUser, async (req: any, res) => {
 });
 
 async function requireExcelImport(req: any, res: any, next: any) {
-  if (await isFreeModeEnabled()) return next();
+  if (await semLimiteDePlano()) return next();
   const plan = PLANS[req.currentUser.planId as PlanId] || PLANS.basico;
   if (!plan.excelImport) {
     return res.status(403).json({ error: "Seu plano atual não permite importação via Excel." });
@@ -2055,6 +2090,7 @@ app.post("/api/fiscal/aplicar", requireUser, async (req: any, res) => {
 });
 
 app.post("/api/checkout/upgrade", requireUser, async (req: any, res) => {
+  if (!PLANOS_ATIVOS) return res.status(404).json({ error: "Planos não estão disponíveis." });
   try {
     if (await isFreeModeEnabled()) {
       return res.status(400).json({ error: "Pagamentos estão temporariamente desativados. Sua conta já tem acesso ilimitado gratuito no momento." });

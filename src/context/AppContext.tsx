@@ -79,6 +79,8 @@ type AppContextType = {
   isGuest: boolean;
   setGuestMode: (v: boolean) => void;
   freeModeEnabled: boolean;
+  /** Planos pagos ligados. Desligados, nada de plano aparece na interface. */
+  planosAtivos: boolean;
   salvarDocumentoEmpresa: (taxId: string) => Promise<void>;
 
   custosFixos: CustoFixoItem[];
@@ -137,11 +139,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   const [freeModeEnabled, setFreeModeEnabled] = useState<boolean>(false);
+  const [planosAtivos, setPlanosAtivos] = useState<boolean>(false);
 
   useEffect(() => {
     fetch('/api/settings')
       .then(res => res.json())
-      .then(data => setFreeModeEnabled(!!data.freeModeEnabled))
+      .then(data => { setFreeModeEnabled(!!data.freeModeEnabled); setPlanosAtivos(!!data.planosAtivos); })
       .catch(() => {});
   }, []);
 
@@ -629,7 +632,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      user, login, logout, isGuest, setGuestMode, freeModeEnabled, salvarDocumentoEmpresa,
+      user, login, logout, isGuest, setGuestMode, freeModeEnabled, planosAtivos, salvarDocumentoEmpresa,
       custosFixos, setCustosFixos,
       produtos, setProdutos,
       saveProduto, removeProduto, syncProdutos,
